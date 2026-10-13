@@ -1,0 +1,12 @@
+{
+  "name": "afriresq",
+  "private": true,
+  "scripts": {
+    "dev:frontend": "npm run dev -w frontend",
+    "dev:backend": "npm run dev -w backend"
+  },
+  "workspaces": [
+    "frontend",
+    "backend"
+  ]
+}

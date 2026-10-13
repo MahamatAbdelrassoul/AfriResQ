@@ -1,0 +1,21 @@
+export async function savePerson(user, profileDone, safety) {
+  const res = await fetch("/api/people", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ user, profileDone, safety }),
+  });
+  const body = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(body.error || "The profile could not be saved.");
+  return body;
+}
+
+export async function findPerson({ phone, email }) {
+  const params = new URLSearchParams();
+  if (phone) params.set("phone", phone);
+  if (email) params.set("email", email);
+  const res = await fetch(`/api/people?${params}`);
+  if (res.status === 404) return null;
+  const body = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(body.error || "The profile could not be loaded.");
+  return body;
+}

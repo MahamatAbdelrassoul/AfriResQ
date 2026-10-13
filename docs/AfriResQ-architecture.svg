@@ -1,0 +1,65 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1400" height="980" viewBox="0 0 1400 980">
+  <rect width="1400" height="980" fill="#f7f4ee"/>
+  <text x="700" y="52" text-anchor="middle" font-family="Segoe UI, Arial, sans-serif" font-size="30" font-weight="700" fill="#071c18">AfriResQ architecture</text>
+  <text x="700" y="82" text-anchor="middle" font-family="Segoe UI, Arial, sans-serif" font-size="15" fill="#5c564e">One web app, one API, one database. The phone and the desk use the same system.</text>
+
+  <defs>
+    <marker id="a" markerWidth="10" markerHeight="8" refX="9" refY="4" orient="auto">
+      <path d="M0,0 L10,4 L0,8 Z" fill="#8a7d6b"/>
+    </marker>
+  </defs>
+  <g fill="none" stroke="#8a7d6b" stroke-width="2" marker-end="url(#a)">
+    <path d="M230 210 V250"/>
+    <path d="M700 210 V250"/>
+    <path d="M1170 210 V250"/>
+    <path d="M230 250 H700"/>
+    <path d="M1170 250 H700"/>
+    <path d="M700 340 V390"/>
+    <path d="M700 490 V540 H360 V580"/>
+    <path d="M700 490 V580"/>
+    <path d="M700 490 V540 H1040 V580"/>
+    <path d="M360 680 V730"/>
+    <path d="M700 680 V730"/>
+    <path d="M1040 680 V730"/>
+  </g>
+
+  <g font-family="Segoe UI, Arial, sans-serif" text-anchor="middle">
+    <rect x="80" y="120" width="300" height="90" rx="14" fill="#ffffff" stroke="#071c18" stroke-width="1.6"/>
+    <text x="230" y="158" font-size="18" font-weight="700" fill="#071c18">Citizen and student</text>
+    <text x="230" y="184" font-size="14" fill="#5c564e">Phone browser</text>
+
+    <rect x="550" y="120" width="300" height="90" rx="14" fill="#ffffff" stroke="#071c18" stroke-width="1.6"/>
+    <text x="700" y="158" font-size="18" font-weight="700" fill="#071c18">Hospital desk and crew</text>
+    <text x="700" y="184" font-size="14" fill="#5c564e">Same web app, desk screens</text>
+
+    <rect x="1020" y="120" width="300" height="90" rx="14" fill="#ffffff" stroke="#071c18" stroke-width="1.6"/>
+    <text x="1170" y="158" font-size="18" font-weight="700" fill="#071c18">Coordinator and admin</text>
+    <text x="1170" y="184" font-size="14" fill="#5c564e">Live cases and verification</text>
+
+    <rect x="470" y="250" width="460" height="90" rx="14" fill="#0f7a6b"/>
+    <text x="700" y="288" font-size="20" font-weight="700" fill="#ffffff">React web app</text>
+    <text x="700" y="314" font-size="14" fill="#e7f6f2">Mobile-first. Our own design. No Bootstrap theme.</text>
+
+    <rect x="470" y="390" width="460" height="100" rx="14" fill="#071c18"/>
+    <text x="700" y="430" font-size="20" font-weight="700" fill="#ffffff">Node.js API</text>
+    <text x="700" y="456" font-size="14" fill="#f4eee4">Accounts, cases, matching a place, desk actions</text>
+
+    <rect x="180" y="580" width="360" height="100" rx="14" fill="#ffffff" stroke="#071c18" stroke-width="1.6"/>
+    <text x="360" y="620" font-size="18" font-weight="700" fill="#071c18">PostgreSQL</text>
+    <text x="360" y="646" font-size="14" fill="#5c564e">People, universities, places, cases</text>
+
+    <rect x="560" y="580" width="280" height="100" rx="14" fill="#ffffff" stroke="#071c18" stroke-width="1.6"/>
+    <text x="700" y="620" font-size="18" font-weight="700" fill="#071c18">WebSocket</text>
+    <text x="700" y="646" font-size="14" fill="#5c564e">Live case and ambulance</text>
+
+    <rect x="860" y="580" width="360" height="100" rx="14" fill="#ffffff" stroke="#071c18" stroke-width="1.6"/>
+    <text x="1040" y="620" font-size="18" font-weight="700" fill="#071c18">SMS and email</text>
+    <text x="1040" y="646" font-size="14" fill="#5c564e">Phone code and university code</text>
+
+    <rect x="470" y="730" width="460" height="90" rx="14" fill="#fff" stroke="#0f7a6b" stroke-width="1.6"/>
+    <text x="700" y="768" font-size="18" font-weight="700" fill="#071c18">Map inside the app</text>
+    <text x="700" y="794" font-size="14" fill="#5c564e">Leaflet. Person, home, hospitals, route, ambulance</text>
+  </g>
+
+  <text x="70" y="880" font-family="Segoe UI, Arial, sans-serif" font-size="15" fill="#14211e">Android comes later and talks to the same API. 999 and 112 stay a phone call, outside this diagram.</text>
+</svg>

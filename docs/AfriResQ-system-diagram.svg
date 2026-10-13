@@ -1,0 +1,104 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1520" height="1860" viewBox="0 0 1520 1860">
+  <rect width="1520" height="1860" fill="#f7f4ee"/>
+  <text x="760" y="52" text-anchor="middle" font-family="Segoe UI, Arial, sans-serif" font-size="32" font-weight="700" fill="#0a1628">AfriResQ system</text>
+  <text x="760" y="84" text-anchor="middle" font-family="Segoe UI, Arial, sans-serif" font-size="16" fill="#5c5348">One app. Medical is the full path. The map sits inside the case.</text>
+
+  <defs>
+    <marker id="arrow" markerWidth="10" markerHeight="8" refX="9" refY="4" orient="auto">
+      <path d="M0,0 L10,4 L0,8 Z" fill="#8a7d6b"/>
+    </marker>
+  </defs>
+
+  <g fill="none" stroke="#8a7d6b" stroke-width="2.25" marker-end="url(#arrow)">
+    <path d="M760 168 V200 H400 V228"/>
+    <path d="M760 168 V200 H1120 V228"/>
+    <path d="M400 318 V360 H760 V388"/>
+    <path d="M1120 318 V360 H760 V388"/>
+    <path d="M760 478 V516"/>
+    <path d="M760 606 V646 H400 V674"/>
+    <path d="M760 606 V646 H1120 V674"/>
+    <path d="M400 764 V804 H180 V832"/>
+    <path d="M400 764 V804 H520 V832"/>
+    <path d="M400 764 V804 H860 V832"/>
+    <path d="M1120 764 V832"/>
+    <path d="M180 922 V962 H520 V990"/>
+    <path d="M180 922 V962 H860 V990"/>
+    <path d="M520 922 V990"/>
+    <path d="M520 922 V962 H860 V990"/>
+    <path d="M860 922 V990"/>
+    <path d="M1200 922 V1120 H760 V1158"/>
+    <path d="M520 1080 V1120 H760 V1158"/>
+    <path d="M860 1080 V1120 H760 V1158"/>
+    <path d="M760 1248 V1286"/>
+  </g>
+
+  <g font-family="Segoe UI, Arial, sans-serif" text-anchor="middle">
+    <rect x="610" y="108" width="300" height="60" rx="12" fill="#0a1628"/>
+    <text x="760" y="145" font-size="20" font-weight="700" fill="#ffffff">Open AfriResQ</text>
+
+    <rect x="250" y="228" width="300" height="90" rx="12" fill="#ffffff" stroke="#0a1628" stroke-width="1.6"/>
+    <text x="400" y="268" font-size="20" font-weight="700" fill="#0a1628">Citizen</text>
+    <text x="400" y="294" font-size="15" fill="#5c5348">Phone + SMS code</text>
+
+    <rect x="970" y="228" width="300" height="90" rx="12" fill="#ffffff" stroke="#0a1628" stroke-width="1.6"/>
+    <text x="1120" y="268" font-size="20" font-weight="700" fill="#0a1628">Student</text>
+    <text x="1120" y="294" font-size="15" fill="#5c5348">University email code</text>
+
+    <rect x="610" y="388" width="300" height="90" rx="12" fill="#ffffff" stroke="#0a1628" stroke-width="1.6"/>
+    <text x="760" y="428" font-size="20" font-weight="700" fill="#0a1628">Profile</text>
+    <text x="760" y="454" font-size="15" fill="#5c5348">Same record for both</text>
+
+    <rect x="610" y="516" width="300" height="90" rx="12" fill="#ffffff" stroke="#0a1628" stroke-width="1.6"/>
+    <text x="760" y="556" font-size="20" font-weight="700" fill="#0a1628">Home</text>
+    <text x="760" y="582" font-size="15" fill="#5c5348">Medical is the front door</text>
+
+    <rect x="250" y="674" width="300" height="90" rx="12" fill="#0e7c6b"/>
+    <text x="400" y="714" font-size="20" font-weight="700" fill="#ffffff">Medical</text>
+    <text x="400" y="740" font-size="15" fill="#e7f6f2">The full path</text>
+
+    <rect x="970" y="674" width="300" height="90" rx="12" fill="#ffffff" stroke="#0a1628" stroke-width="1.6"/>
+    <text x="1120" y="714" font-size="20" font-weight="700" fill="#0a1628">Other types</text>
+    <text x="1120" y="740" font-size="15" fill="#5c5348">Same case, thinner path</text>
+
+    <rect x="40" y="832" width="280" height="90" rx="12" fill="#ffffff" stroke="#0a1628" stroke-width="1.6"/>
+    <text x="180" y="872" font-size="18" font-weight="700" fill="#0a1628">University hospital</text>
+    <text x="180" y="898" font-size="14" fill="#5c5348">Student shortcut</text>
+
+    <rect x="370" y="832" width="300" height="90" rx="12" fill="#ffffff" stroke="#0a1628" stroke-width="1.6"/>
+    <text x="520" y="872" font-size="20" font-weight="700" fill="#0a1628">Nearest place</text>
+    <text x="520" y="898" font-size="15" fill="#5c5348">Citizen and student</text>
+
+    <rect x="710" y="832" width="300" height="90" rx="12" fill="#ffffff" stroke="#0a1628" stroke-width="1.6"/>
+    <text x="860" y="872" font-size="20" font-weight="700" fill="#0a1628">Go myself</text>
+    <text x="860" y="898" font-size="15" fill="#5c5348">Skip the wait</text>
+
+    <rect x="1050" y="832" width="300" height="90" rx="12" fill="#ffffff" stroke="#0a1628" stroke-width="1.6"/>
+    <text x="1200" y="872" font-size="20" font-weight="700" fill="#0a1628">Type desk</text>
+    <text x="1200" y="898" font-size="15" fill="#5c5348">Who answers the others</text>
+
+    <rect x="370" y="990" width="300" height="90" rx="12" fill="#ffffff" stroke="#0a1628" stroke-width="1.6"/>
+    <text x="520" y="1030" font-size="20" font-weight="700" fill="#0a1628">Ambulance</text>
+    <text x="520" y="1056" font-size="15" fill="#5c5348">Only if connected</text>
+
+    <rect x="710" y="990" width="300" height="90" rx="12" fill="#ffffff" stroke="#0a1628" stroke-width="1.6"/>
+    <text x="860" y="1030" font-size="20" font-weight="700" fill="#0a1628">Map route</text>
+    <text x="860" y="1056" font-size="15" fill="#5c5348">Inside the app</text>
+
+    <rect x="610" y="1158" width="300" height="90" rx="12" fill="#ffffff" stroke="#0a1628" stroke-width="1.6"/>
+    <text x="760" y="1198" font-size="20" font-weight="700" fill="#0a1628">Live case</text>
+    <text x="760" y="1224" font-size="15" fill="#5c5348">One open emergency</text>
+
+    <rect x="610" y="1286" width="300" height="90" rx="12" fill="#0a1628"/>
+    <text x="760" y="1326" font-size="20" font-weight="700" fill="#ffffff">Closed</text>
+    <text x="760" y="1352" font-size="15" fill="#f4eee4">Arrive, then stop</text>
+  </g>
+
+  <g font-family="Segoe UI, Arial, sans-serif" fill="#0a1628">
+    <text x="64" y="1480" font-size="18" font-weight="700">Rules</text>
+    <text x="64" y="1516" font-size="16">Citizen and student are two ways in. They meet at Profile.</text>
+    <text x="64" y="1546" font-size="16">A student can open their university hospital, and can still use nearest place or go myself.</text>
+    <text x="64" y="1576" font-size="16">Ambulance only when that place is connected. Otherwise: route and a phone call.</text>
+    <text x="64" y="1606" font-size="16">Other emergencies share the account, the map, and the case, then go to their own desk.</text>
+    <text x="64" y="1636" font-size="16">999 and 112 stay one tap. AfriResQ sits beside them.</text>
+  </g>
+</svg>

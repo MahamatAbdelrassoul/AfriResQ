@@ -1,0 +1,538 @@
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { findPerson, savePerson } from "./account-api.js";
+import { AppState } from "./app-state.js";
+import { createCase, getCase, updateCase } from "./case-api.js";
+import { readFix } from "./locate.js";
+import { PLACES } from "./map.js";
+import { listPlaces } from "./places-api.js";
+import { Sprite } from "./ui.jsx";
+import { CurrentScreen, EdgeLine, Sheets, TabBar, Toast } from "./screens.jsx";
+
+const studentSeed = {
+  type: "student",
+  name: "Amina Kato",
+  phone: "772 123 456",
+  email: "amina.k@students.mak.ac.ug",
+  uni: "Makerere University",
+  studentNo: "2300712345",
+  hall: "Lumumba Hall, room 214",
+  kin: { name: "Grace Kato", rel: "Mother", phone: "701 000 010" },
+  home: { text: "Makerere Hill Rd, Kampala", lat: 0.3224, lng: 32.5693 },
+  med: { blood: "O+", allergies: "Penicillin", cond: "Asthma", meds: "Salbutamol inhaler", share: true },
+  lang: "English",
+};
+
+function loadAccount() {
+  try {
+    const raw = localStorage.getItem("afriresq-account");
+    return raw ? JSON.parse(raw) : null;
+  } catch {
+    return null;
+  }
+}
+
+export default function App() {
+  const saved = useMemo(() => loadAccount(), []);
+  const [user, setUser] = useState(saved?.user || studentSeed);
+  const [profileDone, setProfileDone] = useState(Boolean(saved?.profileDone));
+  const [screen, setScreen] = useState(saved?.profileDone ? "welcomeBack" : "welcome");
+  const [stack, setStack] = useState(saved?.profileDone ? ["welcomeBack"] : ["welcome"]);
+  const [theme, setThemeState] = useState(localStorage.getItem("afriresq-appearance") || "light");
+  const [flow, setFlow] = useState("signup");
+  const [uni, setUni] = useState("Makerere University");
+  const [uniDomain, setUniDomain] = useState("mak.ac.ug");
+  const [uniQuery, setUniQuery] = useState("");
+  const [codeFor, setCodeFor] = useState("");
+  const [signinTab, setSigninTab] = useState("phone");
+  const [safety, setSafety] = useState(saved?.safety || { mode: "always", kin: true, pings: 3 });
+  const [report, setReport] = useState({
+    what: "Injury or fall",
+    awake: "Yes",
+    who: "me",
+    where: "gps",
+    building: "",
+    room: "",
+    landmark: "",
+    done: false,
+  });
+  const [mode, setMode] = useState("uni");
+  const [filter, setFilter] = useState("all");
+  const [place, setPlace] = useState("mak");
+  const [sel, setSel] = useState("mak");
+  const [otherType, setOtherType] = useState("accident");
+  const [otherText, setOtherText] = useState("");
+  const [kase, setKase] = useState(null);
+  const [fix, setFix] = useState(null);
+  const fixRef = useRef(null);
+  const askPromise = useRef(null);
+  const [partnerDesk, setPartnerDesk] = useState("hospital");
+  const [partnerCaseId, setPartnerCaseId] = useState("");
+  const [places, setPlaces] = useState(PLACES);
+  const [rating, setRating] = useState(0);
+  const [trip, setTrip] = useState({ mins: 20, running: false, left: 20 });
+  const [error, setError] = useState("");
+  const [sheet, setSheet] = useState(null);
+  const [toast, setToast] = useState("");
+  const [verifying, setVerifying] = useState(false);
+
+  useEffect(() => {
+    if (theme === "auto") document.documentElement.removeAttribute("data-theme");
+    else document.documentElement.dataset.theme = theme;
+    localStorage.setItem("afriresq-appearance", theme);
+  }, [theme]);
+
+  useEffect(() => {
+    let ignore = false;
+    listPlaces()
+      .then((rows) => {
+        if (ignore || !Array.isArray(rows) || !rows.length) return;
+        const next = {};
+        for (const row of rows) next[row.id] = row;
+        setPlaces(next);
+      })
+      .catch(() => {});
+    return () => {
+      ignore = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!saved?.profileDone || !saved.user?.phone) return undefined;
+    let ignore = false;
+    findPerson({ phone: saved.user.phone })
+      .then((found) => {
+        if (ignore || !found?.profileDone) return;
+        setUser(found.user);
+        setProfileDone(true);
+        setSafety(found.safety);
+        persist(found.user, true, found.safety);
+      })
+      .catch(() => {});
+    return () => {
+      ignore = true;
+    };
+  }, [saved]);
+
+  useEffect(() => {
+    if (!toast) return undefined;
+    const id = setTimeout(() => setToast(""), 2600);
+    return () => clearTimeout(id);
+  }, [toast]);
+
+  function persist(nextUser, done, nextSafety) {
+    localStorage.setItem(
+      "afriresq-account",
+      JSON.stringify({ user: nextUser, profileDone: done, safety: nextSafety }),
+    );
+  }
+
+  const showToast = useCallback((message) => {
+    setToast(message);
+  }, []);
+
+  function openSheet(kind) {
+    setSheet(kind);
+  }
+
+  function closeSheet() {
+    setSheet(null);
+  }
+
+  const caseRef = useRef(null);
+  const stackRef = useRef(stack);
+  const screenRef = useRef(screen);
+  const placeRef = useRef(place);
+  const ignoreHistory = useRef(false);
+  stackRef.current = stack;
+  screenRef.current = screen;
+  placeRef.current = place;
+
+  const go = useCallback((next, arg, reset) => {
+    if (next === "place" && arg) {
+      placeRef.current = arg;
+      setPlace(arg);
+    }
+    setError("");
+    const base = reset ? [] : stackRef.current;
+    const nextStack = base[base.length - 1] === next ? base : [...base, next];
+    const unchanged = screenRef.current === next && nextStack.length === stackRef.current.length && nextStack.every((item, index) => item === stackRef.current[index]);
+    if (unchanged) return;
+    stackRef.current = nextStack;
+    screenRef.current = next;
+    setStack(nextStack);
+    setScreen(next);
+    if (ignoreHistory.current) return;
+    const url = `${window.location.pathname}${window.location.search}#/${next}`;
+    window.history.pushState({ screen: next, stack: nextStack, place: placeRef.current }, "", url);
+  }, []);
+
+  const back = useCallback(() => {
+    setError("");
+    if (stackRef.current.length > 1) {
+      window.history.back();
+      return;
+    }
+    const fallback = ["who", "phone", "universities", "email", "code", "signin"].includes(screenRef.current) ? "welcome" : "home";
+    go(fallback, null, true);
+  }, [go]);
+
+  useEffect(() => {
+    document.querySelector(".app")?.scrollTo(0, 0);
+  }, [screen]);
+
+  useEffect(() => {
+    const first = stackRef.current.at(-1) || screenRef.current;
+    const url = `${window.location.pathname}${window.location.search}#/${first}`;
+    window.history.replaceState({ screen: first, stack: stackRef.current, place: placeRef.current }, "", url);
+    function onPop(event) {
+      const state = event.state;
+      if (!state?.screen) return;
+      ignoreHistory.current = true;
+      const nextStack = Array.isArray(state.stack) && state.stack.length ? state.stack : [state.screen];
+      stackRef.current = nextStack;
+      screenRef.current = state.screen;
+      if (state.place) {
+        placeRef.current = state.place;
+        setPlace(state.place);
+      }
+      setStack(nextStack);
+      setScreen(state.screen);
+      setError("");
+      ignoreHistory.current = false;
+    }
+    window.addEventListener("popstate", onPop);
+    return () => window.removeEventListener("popstate", onPop);
+  }, []);
+
+  function patchUser(partial) {
+    setUser((current) => ({ ...current, ...partial }));
+  }
+
+  function setPath(path, value) {
+    if (path === "otherText") {
+      setOtherText(value);
+      return;
+    }
+    const keys = path.split(".");
+    if (keys[0] === "user") {
+      setUser((current) => {
+        const next = structuredClone(current);
+        let node = next;
+        for (let i = 1; i < keys.length - 1; i += 1) node = node[keys[i]];
+        node[keys[keys.length - 1]] = keys.at(-1) === "phone" || path.endsWith(".phone") ? value.replace(/[^\d\s]/g, "") : value;
+        return next;
+      });
+      return;
+    }
+    if (keys[0] === "report") {
+      setReport((current) => ({ ...current, [keys[1]]: value }));
+    }
+  }
+
+  const student = user.type === "student";
+
+  async function askFix() {
+    if (fixRef.current?.status === "ready") return fixRef.current;
+    if (askPromise.current) return askPromise.current;
+    const pending = { status: "wait" };
+    fixRef.current = pending;
+    setFix(pending);
+    askPromise.current = readFix()
+      .then((point) => {
+        const next = { ...point, status: "ready" };
+        fixRef.current = next;
+        setFix(next);
+        return next;
+      })
+      .catch((err) => {
+        const failed = { status: err?.code === 1 ? "denied" : "failed" };
+        fixRef.current = failed;
+        setFix(failed);
+        return null;
+      })
+      .finally(() => {
+        askPromise.current = null;
+      });
+    return askPromise.current;
+  }
+
+  const value = {
+    user,
+    setUser,
+    patchUser,
+    student,
+    profileDone,
+    screen,
+    theme,
+    setTheme: setThemeState,
+    flow,
+    uni,
+    uniDomain,
+    uniQuery,
+    setUniQuery,
+    codeFor,
+    signinTab,
+    setSigninTab,
+    safety,
+    setSafety,
+    report,
+    setReport,
+    mode,
+    setMode,
+    filter,
+    setFilter,
+    place,
+    setPlace,
+    sel,
+    setSel,
+    otherType,
+    setOtherType,
+    otherText,
+    setOtherText,
+    kase,
+    setKase,
+    rating,
+    setRating,
+    trip,
+    setTrip,
+    error,
+    setError,
+    sheet,
+    toast,
+    verifying,
+    places,
+    partnerDesk,
+    setPartnerDesk,
+    partnerCaseId,
+    setPartnerCaseId,
+    showToast,
+    fix,
+    askFix,
+    openSheet,
+    closeSheet,
+    go,
+    back,
+    setPath,
+    joinCitizen() {
+      setUser((current) => ({
+        ...current,
+        type: "citizen",
+        name: "Peter Okello",
+        email: "",
+        uni: "",
+      }));
+      setFlow("signup");
+      go("phone");
+    },
+    joinStudent() {
+      setUser((current) => ({
+        ...studentSeed,
+        phone: current.phone,
+        kin: current.kin,
+        home: current.home,
+        med: current.med,
+        lang: current.lang,
+      }));
+      setFlow("signup");
+      setUni("Makerere University");
+      setUniDomain("mak.ac.ug");
+      go("email");
+    },
+    sendPhone() {
+      const digits = (user.phone || "").replace(/\D/g, "");
+      if (digits.length < 9) {
+        setError("Enter your 9-digit Uganda number, for example 772 123 456.");
+        return;
+      }
+      setCodeFor(`+256 ${user.phone}`);
+      setFlow("signup");
+      go("code");
+    },
+    pickUni(name, live, domain) {
+      if (!live) {
+        showToast(`${name} is coming soon. It is listed so you can see it, but sign-up is not open yet.`);
+        return;
+      }
+      setUni(name);
+      setUniDomain(domain);
+      patchUser({ uni: name });
+      go("email");
+    },
+    sendEmail() {
+      const value = (user.email || "").trim();
+      if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(value)) {
+        setError("Enter a valid email address.");
+        return;
+      }
+      if (!value.toLowerCase().endsWith(uniDomain)) {
+        setError(`Use your ${uni} email, ending in ${uniDomain}.`);
+        return;
+      }
+      setCodeFor(value);
+      setFlow("signup");
+      go("code");
+    },
+    sendSignin() {
+      const phone = signinTab === "phone";
+      const digits = (user.phone || "").replace(/\D/g, "");
+      const email = (user.email || "").trim();
+      if (phone ? digits.length < 9 : !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) {
+        setError(phone ? "Enter your 9-digit Uganda number." : "Enter your university email.");
+        return;
+      }
+      setCodeFor(phone ? `+256 ${user.phone}` : email);
+      setFlow("signin");
+      go("code");
+    },
+    verify(code) {
+      if (code.length < 6) {
+        setError("Enter all 6 digits, or use the demo code.");
+        return;
+      }
+      setVerifying(true);
+      setTimeout(async () => {
+        setVerifying(false);
+        if (flow === "signin") {
+          try {
+            const found = await findPerson(signinTab === "phone" ? { phone: user.phone } : { email: user.email });
+            if (found?.profileDone) {
+              setUser(found.user);
+              setProfileDone(true);
+              setSafety(found.safety);
+              persist(found.user, true, found.safety);
+              showToast("Signed in. Welcome back.");
+              go("home", null, true);
+              return;
+            }
+          } catch {
+            if (profileDone) {
+              showToast("Signed in. Welcome back.");
+              go("home", null, true);
+              return;
+            }
+          }
+          if (profileDone) {
+            showToast("Signed in. Welcome back.");
+            go("home", null, true);
+            return;
+          }
+        }
+        showToast("Code confirmed");
+        go("profile1");
+      }, 700);
+    },
+    async finishSetup() {
+      try {
+        await savePerson(user, true, safety);
+      } catch (err) {
+        setError(err.message || "The profile could not be saved.");
+        return;
+      }
+      setProfileDone(true);
+      persist(user, true, safety);
+      showToast(safety.mode === "off" ? "Welcome to AfriResQ" : "Safety Net is on. Welcome to AfriResQ");
+      go("home", null, true);
+    },
+    signOut() {
+      setProfileDone(false);
+      setSafety((current) => ({ ...current, mode: "always" }));
+      localStorage.removeItem("afriresq-account");
+      caseRef.current = null;
+      setKase(null);
+      go("welcome", null, true);
+    },
+    async beginCase(fields) {
+      const phoneDigits = (user.phone || "").replace(/\D/g, "");
+      if (phoneDigits.length < 9) {
+        showToast("Add a phone number on your profile before sending a case.");
+        return false;
+      }
+      const placeId = Object.hasOwn(fields, "place") ? fields.place : place;
+      let point = null;
+      if (report.where === "gps") {
+        point = fixRef.current?.status === "ready" ? fixRef.current : await askFix();
+        if (!point) {
+          showToast(fixRef.current?.status === "denied"
+            ? "The browser did not share a location. Use saved home, or write the place."
+            : "The location did not arrive. Try again, or write the place.");
+          return false;
+        }
+      }
+      const where = report.where === "home"
+        ? { whereText: user.home?.text || "", whereLat: user.home?.lat ?? null, whereLng: user.home?.lng ?? null }
+        : report.where === "written"
+          ? { whereText: [report.building, report.room, report.landmark].filter(Boolean).join(", "), whereLat: null, whereLng: null }
+          : { whereText: `Live location, about ${point.accuracy} m`, whereLat: point.lat, whereLng: point.lng };
+      try {
+        await savePerson(user, profileDone, safety);
+        const saved = await createCase({
+          phone: user.phone,
+          kind: fields.kind || "medical",
+          what: fields.what || report.what,
+          awake: report.awake,
+          who: report.who,
+          whereMode: report.where,
+          ...where,
+          building: report.building,
+          room: report.room,
+          landmark: report.landmark,
+          placeId,
+          desk: fields.desk || places[placeId]?.name || "",
+          path: fields.path,
+          otherType: fields.otherType || "",
+          detail: fields.detail || "",
+          state: fields.state || "sent",
+        });
+        caseRef.current = saved;
+        setKase(saved);
+        return true;
+      } catch (err) {
+        showToast(err.message || "The case could not be saved.");
+        return false;
+      }
+    },
+    async moveCase(patch) {
+      const current = caseRef.current;
+      if (!current?.id) return false;
+      try {
+        const saved = await updateCase(current.id, { ...patch, phone: user.phone });
+        caseRef.current = saved;
+        setKase(saved);
+        return true;
+      } catch (err) {
+        showToast(err.message || "The case could not be updated.");
+        return false;
+      }
+    },
+    clearCase() {
+      caseRef.current = null;
+      setKase(null);
+    },
+    async refreshCase() {
+      const id = caseRef.current?.id;
+      if (!id) return null;
+      try {
+        const saved = await getCase(id);
+        if (!saved) return null;
+        caseRef.current = saved;
+        setKase(saved);
+        return saved;
+      } catch {
+        return null;
+      }
+    },
+  };
+
+  return (
+    <AppState.Provider value={value}>
+      <div className="app" data-tabs={["home", "places", "safetyHome", "account"].includes(screen) ? "1" : "0"} data-shell={["welcome", "who", "phone", "universities", "email", "code", "profile1", "profile2", "profile3", "safety", "signin", "welcomeBack", "partnerGate", "partnerSignin", "partnerQueue", "partnerCase"].includes(screen) ? "0" : "1"} data-lightstatus={["welcome", "welcomeBack"].includes(screen) ? "1" : "0"}>
+        <Sprite />
+        <CurrentScreen />
+        <TabBar />
+        <EdgeLine />
+        <Sheets />
+        <Toast />
+      </div>
+    </AppState.Provider>
+  );
+}
