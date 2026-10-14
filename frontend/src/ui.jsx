@@ -1,6 +1,4 @@
-import { useEffect } from "react";
-import { CircleMarker, MapContainer, Polyline, TileLayer, useMap, useMapEvents } from "react-leaflet";
-import "leaflet/dist/leaflet.css";
+import { useEffect, useRef, useState } from "react";
 import sprite from "./sprite.html?raw";
 import { YOU, homePoint } from "./map.js";
 import { useApp } from "./app-state.js";
@@ -56,7 +54,7 @@ export function Field({ label, children, error }) {
   );
 }
 
-export function Inp({ icon, pre, value, onChange, placeholder, type, mode }) {
+export function Inp({ icon, pre, value, onChange, placeholder, type, mode, readOnly }) {
   return (
     <div className="inp">
       {icon ? <Icon n={icon} /> : null}
@@ -67,7 +65,8 @@ export function Inp({ icon, pre, value, onChange, placeholder, type, mode }) {
         type={type}
         inputMode={mode}
         autoComplete="off"
-        onChange={(event) => onChange(event.target.value)}
+        readOnly={readOnly}
+        onChange={(event) => onChange?.(event.target.value)}
       />
     </div>
   );
@@ -100,81 +99,192 @@ export function Steps({ n, total }) {
   );
 }
 
-function Frame({ opts, user, places }) {
-  const map = useMap();
-  const fitKey = [
-    (opts.pins || []).join(","),
-    opts.route ? opts.route.map((point) => point.join(",")).join(";") : "",
-    opts.trail ? "trail" : "",
-    opts.home ? homePoint(user).join(",") : "",
-    opts.you && !opts.route ? opts.you.join(",") : "",
-  ].join("|");
-  useEffect(() => {
-    const fix = () => map.invalidateSize();
-    fix();
-    const timer = setTimeout(fix, 250);
-    const points = [];
-    (opts.pins || []).forEach((id) => {
-      if (places[id]) points.push(places[id].ll);
+const MAPS_KEY = import.meta.env.VITE_GOOGLE_MAPS_API_KEY || "";
+
+let mapsPromise;
+function loadMaps() {
+  window.gm_authFailure = () => {
+    window.dispatchEvent(new CustomEvent("afriresq-maps-denied"));
+  };
+  if (window.google?.maps) return Promise.resolve(window.google.maps);
+  if (!MAPS_KEY) return Promise.reject(new Error("missing key"));
+  if (!mapsPromise) {
+    mapsPromise = new Promise((resolve, reject) => {
+      const callback = "__afriresqMaps";
+      window[callback] = () => {
+        if (window.google?.maps) resolve(window.google.maps);
+        else reject(new Error("maps missing"));
+        delete window[callback];
+      };
+      const script = document.createElement("script");
+      script.src = `https://maps.googleapis.com/maps/api/js?key=${encodeURIComponent(MAPS_KEY)}&v=weekly&loading=async&callback=${callback}`;
+      script.async = true;
+      script.onerror = () => reject(new Error("maps failed"));
+      document.head.appendChild(script);
     });
-    if (opts.route) points.push(...opts.route);
-    if (opts.trail) points.push(...opts.trail);
-    if (opts.home) points.push(homePoint(user));
-    if (opts.you && !opts.route) points.push(opts.you);
-    if (opts.amb && !opts.route) points.push(opts.amb);
-    if (points.length === 1) map.setView(points[0], 16, { animate: false });
-    else if (points.length) map.fitBounds(points, { padding: [36, 36], maxZoom: 16, animate: false });
-    return () => clearTimeout(timer);
-  }, [map, fitKey, places]);
-  return null;
+  }
+  return mapsPromise;
 }
 
-function Taps({ onTap }) {
-  useMapEvents({
-    click(event) {
-      if (onTap) onTap(event.latlng);
-    },
-  });
-  return null;
+function latLng(point) {
+  if (!point || point.length < 2) return null;
+  const lat = Number(point[0]);
+  const lng = Number(point[1]);
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
+  return { lat, lng };
 }
 
 export function MapBoard({ opts = {}, className = "map", style, children, onPin, onTap }) {
   const { user, student, places } = useApp();
+  const node = useRef(null);
+  const mapRef = useRef(null);
+  const onPinRef = useRef(onPin);
+  const onTapRef = useRef(onTap);
+  const [ready, setReady] = useState(false);
+  const [failed, setFailed] = useState(false);
+  onPinRef.current = onPin;
+  onTapRef.current = onTap;
+
+  useEffect(() => {
+    const deny = () => setFailed(true);
+    window.addEventListener("afriresq-maps-denied", deny);
+    return () => window.removeEventListener("afriresq-maps-denied", deny);
+  }, []);
+
+  useEffect(() => {
+    let cancel = false;
+    loadMaps()
+      .then((maps) => {
+        if (cancel || !node.current || mapRef.current) return;
+        mapRef.current = new maps.Map(node.current, {
+          center: { lat: YOU[0], lng: YOU[1] },
+          zoom: 14,
+          disableDefaultUI: true,
+          clickableIcons: false,
+          gestureHandling: "greedy",
+          backgroundColor: "#dfe8e3",
+        });
+        setReady(true);
+      })
+      .catch(() => {
+        if (!cancel) setFailed(true);
+      });
+    return () => {
+      cancel = true;
+    };
+  }, []);
+
+  const spec = [
+    (opts.pins || []).join(","),
+    opts.sel || "",
+    opts.route ? opts.route.map((point) => point.join(",")).join(";") : "",
+    opts.trail ? opts.trail.map((point) => point.join(",")).join(";") : "",
+    opts.you ? opts.you.join(",") : "",
+    opts.amb ? opts.amb.join(",") : "",
+    opts.home ? homePoint(user).join(",") : "",
+    student ? user.uni || "" : "",
+  ].join("|");
+
+  useEffect(() => {
+    const map = mapRef.current;
+    const maps = window.google?.maps;
+    if (!ready || !map || !maps) return undefined;
+    const drawn = [];
+    const bounds = new maps.LatLngBounds();
+    let count = 0;
+    const extend = (point) => {
+      if (!point) return;
+      bounds.extend(point);
+      count += 1;
+    };
+    const circle = (point, fill, stroke, scale) => {
+      if (!point) return;
+      drawn.push(new maps.Marker({
+        map,
+        position: point,
+        clickable: false,
+        icon: {
+          path: maps.SymbolPath.CIRCLE,
+          scale,
+          fillColor: fill,
+          fillOpacity: 1,
+          strokeColor: stroke,
+          strokeWeight: 3,
+        },
+      }));
+      extend(point);
+    };
+
+    if (opts.route?.length) {
+      const path = opts.route.map(latLng).filter(Boolean);
+      drawn.push(new maps.Polyline({ map, path, strokeColor: "#0B8F4D", strokeWeight: 5, strokeOpacity: 0.9 }));
+      path.forEach(extend);
+    }
+    if (opts.trail?.length) {
+      const path = opts.trail.map(latLng).filter(Boolean);
+      drawn.push(new maps.Polyline({
+        map,
+        path,
+        strokeColor: "#0B8F4D",
+        strokeWeight: 4,
+        strokeOpacity: 0.7,
+        icons: [{ icon: { path: "M 0,-1 0,1", strokeOpacity: 1, scale: 3 }, offset: "0", repeat: "12px" }],
+        strokeOpacity: 0,
+      }));
+      path.forEach(extend);
+    }
+    (opts.pins || []).forEach((id) => {
+      const place = places[id];
+      const point = latLng(place?.ll);
+      if (!point) return;
+      const uni = student && place.uni === user.uni;
+      const listed = !place.conn && !uni;
+      const marker = new maps.Marker({
+        map,
+        position: point,
+        icon: {
+          path: maps.SymbolPath.CIRCLE,
+          scale: opts.sel === id ? 11 : 8,
+          fillColor: uni ? "#6552E0" : listed ? "#ffffff" : "#0B8F4D",
+          fillOpacity: 1,
+          strokeColor: listed ? "#0B8F4D" : "#ffffff",
+          strokeWeight: 3,
+        },
+      });
+      marker.addListener("click", () => onPinRef.current?.(id));
+      drawn.push(marker);
+      extend(point);
+    });
+    circle(latLng(opts.you), "#0B8F4D", "#ffffff", 8);
+    if (opts.home) circle(latLng(homePoint(user)), "#E39A0B", "#ffffff", 8);
+    circle(latLng(opts.amb), "#D93636", "#ffffff", 9);
+
+    const timer = setTimeout(() => {
+      maps.event.trigger(map, "resize");
+      if (count === 1) {
+        map.setCenter(bounds.getCenter());
+        map.setZoom(16);
+      } else if (count > 1) {
+        map.fitBounds(bounds, 36);
+      }
+    }, 60);
+    const tap = onTapRef.current
+      ? map.addListener("click", (event) => {
+        if (!event.latLng) return;
+        onTapRef.current?.({ lat: event.latLng.lat(), lng: event.latLng.lng() });
+      })
+      : null;
+    return () => {
+      clearTimeout(timer);
+      if (tap) maps.event.removeListener(tap);
+      drawn.forEach((item) => item.setMap(null));
+    };
+  }, [ready, spec, places]);
+
   return (
     <div className={className} style={style}>
-      <MapContainer center={YOU} zoom={14} zoomControl={false} attributionControl>
-        <TileLayer
-          url="https://tile.openstreetmap.org/{z}/{x}/{y}.png"
-          attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
-        />
-        <Frame opts={opts} user={user} places={places} />
-        {onTap ? <Taps onTap={onTap} /> : null}
-        {opts.route ? <Polyline positions={opts.route} pathOptions={{ color: "#0B8F4D", weight: 5, opacity: 0.9 }} /> : null}
-        {opts.trail ? <Polyline positions={opts.trail} pathOptions={{ color: "#0B8F4D", weight: 4, opacity: 0.7, dashArray: "8 8" }} /> : null}
-        {(opts.pins || []).map((id) => {
-          const place = places[id];
-          if (!place) return null;
-          const uni = student && place.uni === user.uni;
-          const listed = !place.conn && !uni;
-          return (
-            <CircleMarker
-              key={id}
-              center={place.ll}
-              radius={opts.sel === id ? 11 : 8}
-              pathOptions={{
-                color: listed ? "#0B8F4D" : "#ffffff",
-                weight: 3,
-                fillColor: uni ? "#6552E0" : listed ? "#ffffff" : "#0B8F4D",
-                fillOpacity: 1,
-              }}
-              eventHandlers={{ click: () => onPin && onPin(id) }}
-            />
-          );
-        })}
-        {opts.you ? <CircleMarker center={opts.you} radius={8} pathOptions={{ color: "#ffffff", weight: 3, fillColor: "#0B8F4D", fillOpacity: 1 }} /> : null}
-        {opts.home ? <CircleMarker center={homePoint(user)} radius={8} pathOptions={{ color: "#ffffff", weight: 3, fillColor: "#E39A0B", fillOpacity: 1 }} /> : null}
-        {opts.amb ? <CircleMarker center={opts.amb} radius={9} pathOptions={{ color: "#ffffff", weight: 3, fillColor: "#D93636", fillOpacity: 1 }} /> : null}
-      </MapContainer>
+      <div ref={node} className="gmap" />
+      {failed ? <p className="map-fallback">Google Maps is switched off for this key. Enable the Maps JavaScript API, then reload.</p> : null}
       {children}
     </div>
   );

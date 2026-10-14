@@ -5,6 +5,7 @@ import cors from "cors";
 import express from "express";
 import pg from "pg";
 import { adminRouter, seedAdmin } from "./admin.js";
+import { authRouter } from "./auth.js";
 import { casesRouter } from "./cases.js";
 import { deskRouter, seedDeskCodes } from "./desks.js";
 import { peopleRouter } from "./people.js";
@@ -35,6 +36,7 @@ const pool = new pg.Pool({
 app.use(cors());
 app.use(express.json());
 
+app.use("/api/auth", authRouter(pool));
 app.use("/api/people", peopleRouter(pool));
 app.use("/api/cases", casesRouter(pool));
 app.use("/api/places", placesRouter(pool));

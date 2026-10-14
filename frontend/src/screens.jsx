@@ -5,18 +5,18 @@ import { HOME, ROUTES, STEPS, TRAIL, YOU, pointAlong } from "./map.js";
 import { PartnerCase, PartnerGate, PartnerQueue, PartnerSignIn } from "./partner.jsx";
 import { PARTNER_CATEGORIES } from "./partner-categories.js";
 import { Btn, Field, Hdr, Icon, Inp, MapBoard, Note, Screen, Steps } from "./ui.jsx";
-import accidentArt from "./assets/scenes/scene-accident.jpg";
-import fireArt from "./assets/scenes/scene-fire.jpg";
-import securityArt from "./assets/scenes/scene-security.jpg";
-import missingArt from "./assets/scenes/scene-missing.jpg";
-import disasterArt from "./assets/scenes/scene-disaster.jpg";
-import generalArt from "./assets/scenes/scene-general.jpg";
-import medicalArt from "./assets/scenes/scene-medical.jpg";
-import walkArt from "./assets/scenes/scene-walk.jpg";
-import joinArt from "./assets/scenes/scene-join.jpg";
-import universityArt from "./assets/scenes/scene-university.jpg";
-import profileArt from "./assets/scenes/scene-profile.jpg";
-import safetyArt from "./assets/scenes/scene-safety.jpg";
+import accidentArt from "./assets/scenes/scene-accident.png";
+import fireArt from "./assets/scenes/scene-fire.png";
+import securityArt from "./assets/scenes/scene-security.png";
+import missingArt from "./assets/scenes/scene-missing.png";
+import disasterArt from "./assets/scenes/scene-disaster.png";
+import generalArt from "./assets/scenes/scene-general.png";
+import medicalArt from "./assets/scenes/scene-medical.png";
+import walkArt from "./assets/scenes/scene-walk.png";
+import joinArt from "./assets/scenes/scene-join.png";
+import universityArt from "./assets/scenes/scene-university.png";
+import profileArt from "./assets/scenes/scene-profile.png";
+import safetyArt from "./assets/scenes/scene-safety.png";
 
 const UNIS = [
   ["Makerere University", "Kampala", 1, "mak.ac.ug"],
@@ -59,7 +59,7 @@ const SCENES = {
   join: ["One account,\ntwo doors", joinArt, [["user", "Citizen", "Phone and an SMS code"], ["cap", "Student", "University email, plus a phone"], ["shield", "Same profile", "The same app either way"]]],
   phone: ["A number\nthey can call", joinArt, [["phone", "Uganda number", "A code by SMS"], ["lock", "Confirmed first", "Before the account exists"], ["amb", "A crew calls it", "When a case is open"]]],
   university: ["Your\nuniversity", universityArt, [["cap", "Makerere", "Live in Kampala"], ["mail", "Email next", "A code to your inbox"], ["info", "The others", "Listed until they go live"]]],
-  email: ["Prove you\nstudy here", universityArt, [["mail", "The address", "Must end in mak.ac.ug"], ["cap", "Makerere", "The university for this version"], ["phone", "A phone too", "Saved on your profile"]]],
+  email: ["Prove you\nstudy here", universityArt, [["mail", "The address", "name@students.mak.ac.ug"], ["cap", "Makerere", "The university for this version"], ["phone", "A phone too", "Saved on your profile"]]],
   code: ["Check the\nmessage", joinArt, [["lock", "Six digits", "Sent just now"], ["phone", "Or your inbox", "Whichever door you used"], ["shield", "Then your profile", "So help can find you"]]],
   profile1: ["So help\ncan act", profileArt, [["user", "Your name", "If you cannot speak"], ["phone", "Your number", "A desk can call it"], ["globe", "Your language", "How we speak with you"]]],
   profile2: ["People\nand a home", profileArt, [["users", "Next of kin", "Called if you cannot answer"], ["home", "Home pin", "Used when GPS fails"], ["shield", "On your profile", "Until you change it"]]],
@@ -440,7 +440,7 @@ function Who() {
 }
 
 function Phone() {
-  const { user, setPath, error, sendPhone } = useApp();
+  const { user, setPath, error, sendPhone, sending } = useApp();
   return (
     <Screen>
       <div className="body">
@@ -453,7 +453,7 @@ function Phone() {
         <Note icon="lock">The number is confirmed before your account exists.</Note>
         </div>
       </div>
-      <div className="foot"><Btn onClick={sendPhone}>Send code</Btn></div>
+      <div className="foot"><Btn disabled={sending} onClick={sendPhone}>{sending ? "Sending..." : "Send code"}</Btn></div>
     </Screen>
   );
 }
@@ -487,29 +487,29 @@ function Universities() {
 }
 
 function Email() {
-  const { uni, uniDomain, user, setPath, error, sendEmail } = useApp();
+  const { uni, uniDomain, user, setPath, error, sendEmail, sending } = useApp();
   return (
     <Screen>
       <div className="body">
         <PageArt kind="email" title="University email" sub="Makerere University" />
         <div className="form-side">
         <span className="pill violet" style={{ alignSelf: "flex-start" }}><Icon n="cap" c="s" />{uni}</span>
-        <p className="sub">We send a code to your university inbox. It proves you are a student. The address must end in <b>{uniDomain}</b>.</p>
-        <Field label="University email" error={error}>
+        <p className="sub">We email a code to your student inbox. The address must be <b>name@{`students.${uniDomain}`}</b>.</p>
+        <Field label="Student email" error={error}>
           <Inp icon="mail" type="email" value={user.email} placeholder={`name@students.${uniDomain}`} onChange={(value) => setPath("user.email", value)} />
         </Field>
         <Note tone="violet">You will still save a phone number on your profile, because email is not how a crew reaches someone at the roadside.</Note>
         </div>
       </div>
-      <div className="foot"><Btn onClick={sendEmail}>Send code</Btn></div>
+      <div className="foot"><Btn disabled={sending} onClick={sendEmail}>{sending ? "Sending..." : "Send code"}</Btn></div>
     </Screen>
   );
 }
 
 function Code() {
-  const { codeFor, error, verify, verifying } = useApp();
+  const { codeFor, error, verify, verifying, resendCode, sending } = useApp();
   const [digits, setDigits] = useState(["", "", "", "", "", ""]);
-  const [left, setLeft] = useState(42);
+  const [left, setLeft] = useState(45);
   useEffect(() => {
     const id = setInterval(() => setLeft((value) => Math.max(0, value - 1)), 1000);
     return () => clearInterval(id);
@@ -545,6 +545,7 @@ function Code() {
         </div>
         {error ? <div className="err" style={{ textAlign: "center" }} role="alert">{error}</div> : null}
         <p className="fine">{left ? `Resend code in 0:${left < 10 ? `0${left}` : left}` : "You can ask for a new code now"}</p>
+        {!left ? <button type="button" className="link" disabled={sending} onClick={async () => { const ok = await resendCode(); if (ok) setLeft(45); }}>Send a new code</button> : null}
         </div>
       </div>
       <div className="foot">
@@ -565,11 +566,11 @@ function Profile1() {
         <p className="sub">We fill this once. It lets help act even if you cannot speak for yourself.</p>
         <Field label="Full name"><Inp icon="user" value={user.name} placeholder="Your full name" onChange={(value) => setPath("user.name", value)} /></Field>
         <Field label={student ? "Phone (required)" : "Phone (confirmed by SMS)"}>
-          <Inp icon="phone" pre="+256" mode="tel" value={user.phone} placeholder="7XX XXX XXX" onChange={(value) => setPath("user.phone", value)} />
+          <Inp icon="phone" pre="+256" mode="tel" value={user.phone} placeholder="7XX XXX XXX" readOnly={!student} onChange={(value) => setPath("user.phone", value)} />
         </Field>
         {student ? (
           <>
-            <Field label="University email (confirmed)"><Inp icon="mail" value={user.email} onChange={(value) => setPath("user.email", value)} /></Field>
+            <Field label="University email (confirmed)"><Inp icon="mail" value={user.email} readOnly onChange={() => {}} /></Field>
             <Field label="Student number"><Inp icon="cap" mode="numeric" value={user.studentNo} placeholder="e.g. 2300712345" onChange={(value) => setPath("user.studentNo", value)} /></Field>
             <Field label="Campus hall or residence"><Inp icon="home" value={user.hall} placeholder="e.g. Lumumba Hall, room 214" onChange={(value) => setPath("user.hall", value)} /></Field>
           </>
@@ -720,7 +721,7 @@ function Consent() {
 }
 
 function SignIn() {
-  const { signinTab, setSigninTab, user, setPath, error, sendSignin, go } = useApp();
+  const { signinTab, setSigninTab, user, setPath, error, sendSignin, go, sending } = useApp();
   return (
     <Screen>
       <div className="body">
@@ -739,11 +740,11 @@ function SignIn() {
             <Inp icon="mail" type="email" value={user.email} placeholder="name@students.mak.ac.ug" onChange={(value) => setPath("user.email", value)} />
           </Field>
         )}
-        <Note>We send a code. No password to remember.</Note>
+        <Note>{signinTab === "phone" ? "Citizens get a 6-digit code by SMS." : "Makerere students use name@students.mak.ac.ug. The code arrives by email."}</Note>
         </div>
       </div>
       <div className="foot">
-        <Btn onClick={sendSignin}>Send code</Btn>
+        <Btn disabled={sending} onClick={sendSignin}>{sending ? "Sending..." : "Send code"}</Btn>
         <button type="button" className="link" onClick={() => go("who")}>New here? Create an account</button>
       </div>
     </Screen>

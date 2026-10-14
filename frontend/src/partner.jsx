@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import medicalArt from "./assets/scenes/scene-medical.jpg";
+import medicalArt from "./assets/scenes/scene-medical.png";
 import { getCase, listDeskCases, updateCase } from "./case-api.js";
 import { clearDeskSession, closeDesk, openDesk, readDeskSession, saveDeskSession } from "./desk-api.js";
 import { useApp } from "./app-state.js";

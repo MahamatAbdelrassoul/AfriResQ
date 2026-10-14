@@ -1,7 +1,42 @@
-export async function savePerson(user, profileDone, safety) {
-  const res = await fetch("/api/people", {
+export function studentHost(domain = "mak.ac.ug") {
+  return `students.${domain}`;
+}
+
+export function isStudentEmail(value, domain = "mak.ac.ug") {
+  const email = String(value || "").trim();
+  const host = studentHost(domain).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return new RegExp(`^[^@\\s]+@${host}$`, "i").test(email);
+}
+
+export async function requestOtp(payload) {
+  const res = await fetch("/api/auth/otp", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  const body = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(body.error || "The code could not be sent.");
+  return body;
+}
+
+export async function verifyOtp(payload) {
+  const res = await fetch("/api/auth/otp/verify", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  const body = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(body.error || "That code could not be checked.");
+  return body;
+}
+
+export async function savePerson(user, profileDone, safety, token) {
+  const res = await fetch("/api/people", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    },
     body: JSON.stringify({ user, profileDone, safety }),
   });
   const body = await res.json().catch(() => ({}));
