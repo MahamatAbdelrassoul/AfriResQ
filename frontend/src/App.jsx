@@ -91,9 +91,13 @@ export default function App() {
     localStorage.setItem("afriresq-appearance", theme);
   }, [theme]);
 
+  // Rounded to about 100 m, so walking around does not reload the places every few seconds.
+  const nearKey = fix?.status === "ready" ? `${fix.lat.toFixed(3)},${fix.lng.toFixed(3)}` : "";
+
   useEffect(() => {
     let ignore = false;
-    listPlaces()
+    const [lat, lng] = nearKey ? nearKey.split(",").map(Number) : [];
+    listPlaces(nearKey ? { lat, lng } : null)
       .then((rows) => {
         if (ignore || !Array.isArray(rows) || !rows.length) return;
         const next = {};
@@ -104,7 +108,7 @@ export default function App() {
     return () => {
       ignore = true;
     };
-  }, []);
+  }, [nearKey]);
 
   useEffect(() => {
     if (!saved?.profileDone || !saved.user?.phone) return undefined;
