@@ -8,22 +8,25 @@ Android, iOS, SMS, email delivery, and real driving routes come later. Until the
 
 ## What is saved
 
-PostgreSQL holds the people, the cases, the places, the desk codes, and the team sign-in. The website keeps a copy of the profile in the browser so the screens can open, and the API is the copy that remains after the browser is closed.
+Supabase holds the people, the cases, the places, the desk codes, and the team sign-in. The website keeps a copy of the profile in the browser so the screens can open, and the API is the copy that remains after the browser is closed.
 
 | Folder | What it is |
 | --- | --- |
 | `frontend` | The website. React, Vite, and our own CSS. |
 | `backend` | The API. Node.js and Express. The tables are in `backend/src/schema.sql`. |
+| `supabase` | Settings for the local Supabase stack. |
 | `docs` | Diagrams. |
 
 ## Run it
+
+The database is Supabase: PostgreSQL with PostGIS for map searches. On your computer it runs as the local Supabase stack in Docker. The same setup moves to a Supabase cloud project later.
 
 Install [Docker Desktop](https://www.docker.com/products/docker-desktop/) and [Node.js](https://nodejs.org/) 20 or newer. Then, from this folder:
 
 ```bash
 npm install
 copy backend\.env.example backend\.env
-docker compose up -d
+npm run db:start
 npm run dev:backend
 npm run dev:frontend
 ```
@@ -31,6 +34,8 @@ npm run dev:frontend
 On macOS or Linux, use `cp backend/.env.example backend/.env` instead of `copy`.
 
 Open the API and the website in two terminals. The site is http://localhost:5173. The team page is http://localhost:5173/admin. The API health check is http://localhost:4001/api/health and should say the database is connected.
+
+`npm run db:start` prints the Supabase addresses. Studio, where you can browse the tables, is http://127.0.0.1:54323. Stop the database with `npm run db:stop`. Your data is kept until the next start.
 
 The first start creates the tables and the two Makerere desks. Codes in a fresh copy:
 

@@ -20,8 +20,16 @@ if (!process.env.DATABASE_URL) {
   console.error("DATABASE_URL is missing. Copy backend/.env.example to backend/.env.");
   process.exit(1);
 }
+// The local Supabase stack has no SSL. Supabase cloud requires it. Put the
+// project's CA certificate in DATABASE_SSL_CA to also check who answers.
+const dbHost = new URL(process.env.DATABASE_URL).hostname;
+const isLocalDb = ["localhost", "127.0.0.1", "::1"].includes(dbHost);
+const caPath = process.env.DATABASE_SSL_CA;
 const pool = new pg.Pool({
   connectionString: process.env.DATABASE_URL,
+  ssl: isLocalDb ? false : caPath
+    ? { ca: readFileSync(caPath, "utf8"), rejectUnauthorized: true }
+    : { rejectUnauthorized: false },
 });
 
 app.use(cors());

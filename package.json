@@ -2,11 +2,16 @@
   "name": "afriresq",
   "private": true,
   "scripts": {
+    "db:start": "supabase start",
+    "db:stop": "supabase stop",
     "dev:frontend": "npm run dev -w frontend",
     "dev:backend": "npm run dev -w backend"
   },
   "workspaces": [
     "frontend",
     "backend"
-  ]
+  ],
+  "devDependencies": {
+    "supabase": "2.105.0"
+  }
 }

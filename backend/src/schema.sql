@@ -1,5 +1,7 @@
 -- PostGIS answers map questions, such as the nearest hospital to a point.
-create extension if not exists postgis;
+-- Supabase keeps extensions in their own schema, and its database role already searches it.
+create schema if not exists extensions;
+create extension if not exists postgis with schema extensions;
 
 -- One row is one person. The browser no longer has to be the only copy.
 create table if not exists people (
@@ -151,3 +153,15 @@ alter table cases add column if not exists where_location geography(Point, 4326)
     end
   ) stored;
 create index if not exists cases_where_location_idx on cases using gist (where_location);
+
+-- Supabase puts every public table on its web API for anyone with the publishable key.
+-- Row level security with no policies closes that door. The AfriResQ API owns these
+-- tables, so it is not affected. Add a policy only when the website must read a table directly.
+alter table people enable row level security;
+alter table cases enable row level security;
+alter table places enable row level security;
+alter table desk_codes enable row level security;
+alter table desk_sessions enable row level security;
+alter table admin_gate enable row level security;
+alter table admin_sessions enable row level security;
+alter table partner_applications enable row level security;
