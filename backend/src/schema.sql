@@ -151,3 +151,29 @@ alter table cases add column if not exists where_location geography(Point, 4326)
     end
   ) stored;
 create index if not exists cases_where_location_idx on cases using gist (where_location);
+
+-- A one-time code for a phone (SMS) or a student inbox. Only the hash is stored.
+create table if not exists auth_codes (
+  id uuid primary key default gen_random_uuid(),
+  channel text not null check (channel in ('sms', 'email')),
+  destination text not null,
+  code_hash text not null,
+  purpose text not null check (purpose in ('signup', 'signin')),
+  expires_at timestamptz not null,
+  attempts integer not null default 0,
+  consumed_at timestamptz,
+  created_at timestamptz not null default now()
+);
+
+create index if not exists auth_codes_destination_idx
+  on auth_codes (destination, created_at desc);
+
+-- Proof that a phone or student email was confirmed. The browser holds the token; the database holds its hash.
+create table if not exists auth_sessions (
+  token_hash text primary key,
+  channel text not null check (channel in ('sms', 'email')),
+  destination text not null,
+  purpose text not null check (purpose in ('signup', 'signin')),
+  expires_at timestamptz not null,
+  created_at timestamptz not null default now()
+);

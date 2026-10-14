@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { findPerson, savePerson } from "./account-api.js";
+import { findPerson, isStudentEmail, requestOtp, savePerson, studentHost, verifyOtp } from "./account-api.js";
 import { AppState } from "./app-state.js";
 import { createCase, getCase, updateCase } from "./case-api.js";
 import { readFix } from "./locate.js";
@@ -11,8 +11,8 @@ import { CurrentScreen, EdgeLine, Sheets, TabBar, Toast } from "./screens.jsx";
 const studentSeed = {
   type: "student",
   name: "Amina Kato",
-  phone: "772 123 456",
-  email: "amina.k@students.mak.ac.ug",
+  phone: "",
+  email: "",
   uni: "Makerere University",
   studentNo: "2300712345",
   hall: "Lumumba Hall, room 214",
@@ -84,6 +84,8 @@ export default function App() {
   const [sheet, setSheet] = useState(null);
   const [toast, setToast] = useState("");
   const [verifying, setVerifying] = useState(false);
+  const [sending, setSending] = useState(false);
+  const [authToken, setAuthToken] = useState(() => localStorage.getItem("afriresq-auth") || "");
 
   useEffect(() => {
     if (theme === "auto") document.documentElement.removeAttribute("data-theme");
@@ -270,6 +272,33 @@ export default function App() {
     return askPromise.current;
   }
 
+  function rememberToken(token) {
+    setAuthToken(token || "");
+    if (token) localStorage.setItem("afriresq-auth", token);
+    else localStorage.removeItem("afriresq-auth");
+  }
+
+  async function issueCode({ channel, purpose }) {
+    setSending(true);
+    setError("");
+    try {
+      const result = await requestOtp({
+        channel,
+        purpose,
+        phone: user.phone,
+        email: user.email,
+      });
+      setCodeFor(result.destination || (channel === "sms" ? `+256 ${user.phone}` : user.email));
+      setFlow(purpose);
+      return true;
+    } catch (err) {
+      setError(err.message || "The code could not be sent.");
+      return false;
+    } finally {
+      setSending(false);
+    }
+  }
+
   const value = {
     user,
     setUser,
@@ -314,6 +343,7 @@ export default function App() {
     sheet,
     toast,
     verifying,
+    sending,
     places,
     partnerDesk,
     setPartnerDesk,
@@ -331,9 +361,11 @@ export default function App() {
       setUser((current) => ({
         ...current,
         type: "citizen",
-        name: "Peter Okello",
+        name: "",
         email: "",
         uni: "",
+        phone: "",
+        studentNo: "",
       }));
       setFlow("signup");
       go("phone");
@@ -341,7 +373,10 @@ export default function App() {
     joinStudent() {
       setUser((current) => ({
         ...studentSeed,
-        phone: current.phone,
+        phone: "",
+        email: "",
+        name: "",
+        studentNo: "",
         kin: current.kin,
         home: current.home,
         med: current.med,
@@ -352,15 +387,14 @@ export default function App() {
       setUniDomain("mak.ac.ug");
       go("email");
     },
-    sendPhone() {
+    async sendPhone() {
       const digits = (user.phone || "").replace(/\D/g, "");
-      if (digits.length < 9) {
+      if (!/^7\d{8}$/.test(digits)) {
         setError("Enter your 9-digit Uganda number, for example 772 123 456.");
         return;
       }
-      setCodeFor(`+256 ${user.phone}`);
-      setFlow("signup");
-      go("code");
+      const ok = await issueCode({ channel: "sms", purpose: "signup" });
+      if (ok) go("code");
     },
     pickUni(name, live, domain) {
       if (!live) {
@@ -372,72 +406,74 @@ export default function App() {
       patchUser({ uni: name });
       go("email");
     },
-    sendEmail() {
-      const value = (user.email || "").trim();
-      if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(value)) {
-        setError("Enter a valid email address.");
+    async sendEmail() {
+      const address = (user.email || "").trim();
+      if (!isStudentEmail(address, uniDomain)) {
+        setError(`Use your ${uni} student email, name@${studentHost(uniDomain)}.`);
         return;
       }
-      if (!value.toLowerCase().endsWith(uniDomain)) {
-        setError(`Use your ${uni} email, ending in ${uniDomain}.`);
-        return;
-      }
-      setCodeFor(value);
-      setFlow("signup");
-      go("code");
+      const ok = await issueCode({ channel: "email", purpose: "signup" });
+      if (ok) go("code");
     },
-    sendSignin() {
+    async sendSignin() {
       const phone = signinTab === "phone";
       const digits = (user.phone || "").replace(/\D/g, "");
       const email = (user.email || "").trim();
-      if (phone ? digits.length < 9 : !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) {
-        setError(phone ? "Enter your 9-digit Uganda number." : "Enter your university email.");
+      if (phone ? !/^7\d{8}$/.test(digits) : !isStudentEmail(email)) {
+        setError(phone ? "Enter your 9-digit Uganda number." : `Use your Makerere student email, name@${studentHost()}.`);
         return;
       }
-      setCodeFor(phone ? `+256 ${user.phone}` : email);
-      setFlow("signin");
-      go("code");
+      const ok = await issueCode({ channel: phone ? "sms" : "email", purpose: "signin" });
+      if (ok) go("code");
     },
-    verify(code) {
-      if (code.length < 6) {
-        setError("Enter all 6 digits, or use the demo code.");
+    async resendCode() {
+      const channel = flow === "signin"
+        ? (signinTab === "phone" ? "sms" : "email")
+        : (user.type === "student" ? "email" : "sms");
+      return issueCode({ channel, purpose: flow });
+    },
+    async verify(code) {
+      const clean = String(code || "").replace(/\D/g, "");
+      if (clean.length < 6) {
+        setError("Enter all 6 digits from the message.");
         return;
       }
+      const channel = flow === "signin"
+        ? (signinTab === "phone" ? "sms" : "email")
+        : (user.type === "student" ? "email" : "sms");
       setVerifying(true);
-      setTimeout(async () => {
-        setVerifying(false);
+      try {
+        const result = await verifyOtp({
+          channel,
+          phone: user.phone,
+          email: user.email,
+          code: clean,
+        });
+        rememberToken(result.token);
         if (flow === "signin") {
-          try {
-            const found = await findPerson(signinTab === "phone" ? { phone: user.phone } : { email: user.email });
-            if (found?.profileDone) {
-              setUser(found.user);
-              setProfileDone(true);
-              setSafety(found.safety);
-              persist(found.user, true, found.safety);
-              showToast("Signed in. Welcome back.");
-              go("home", null, true);
-              return;
-            }
-          } catch {
-            if (profileDone) {
-              showToast("Signed in. Welcome back.");
-              go("home", null, true);
-              return;
-            }
-          }
-          if (profileDone) {
-            showToast("Signed in. Welcome back.");
-            go("home", null, true);
+          if (!result.account?.profileDone) {
+            setError("No saved profile was found. Join first.");
             return;
           }
+          setUser(result.account.user);
+          setProfileDone(true);
+          setSafety(result.account.safety);
+          persist(result.account.user, true, result.account.safety);
+          showToast("Signed in. Welcome back.");
+          go("home", null, true);
+          return;
         }
         showToast("Code confirmed");
         go("profile1");
-      }, 700);
+      } catch (err) {
+        setError(err.message || "That code is not right.");
+      } finally {
+        setVerifying(false);
+      }
     },
     async finishSetup() {
       try {
-        await savePerson(user, true, safety);
+        await savePerson(user, true, safety, authToken);
       } catch (err) {
         setError(err.message || "The profile could not be saved.");
         return;
@@ -451,6 +487,7 @@ export default function App() {
       setProfileDone(false);
       setSafety((current) => ({ ...current, mode: "always" }));
       localStorage.removeItem("afriresq-account");
+      rememberToken("");
       caseRef.current = null;
       setKase(null);
       go("welcome", null, true);
@@ -478,7 +515,7 @@ export default function App() {
           ? { whereText: [report.building, report.room, report.landmark].filter(Boolean).join(", "), whereLat: null, whereLng: null }
           : { whereText: `Live location, about ${point.accuracy} m`, whereLat: point.lat, whereLng: point.lng };
       try {
-        await savePerson(user, profileDone, safety);
+        await savePerson(user, profileDone, safety, authToken);
         const saved = await createCase({
           phone: user.phone,
           kind: fields.kind || "medical",
