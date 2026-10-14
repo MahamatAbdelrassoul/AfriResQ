@@ -3,6 +3,7 @@ import { useApp } from "./app-state.js";
 import { pinFrom, watchFix } from "./locate.js";
 import { HOME, ROUTES, STEPS, TRAIL, YOU, pointAlong } from "./map.js";
 import { PartnerCase, PartnerGate, PartnerQueue, PartnerSignIn } from "./partner.jsx";
+import { PARTNER_CATEGORIES } from "./partner-categories.js";
 import { Btn, Field, Hdr, Icon, Inp, MapBoard, Note, Screen, Steps } from "./ui.jsx";
 import accidentArt from "./assets/scenes/scene-accident.jpg";
 import fireArt from "./assets/scenes/scene-fire.jpg";
@@ -71,9 +72,11 @@ function PageArt({ title, sub, sos = false, kind, line, points }) {
   const scene = SCENES[kind];
   const bits = points || scene[2];
   return (
-    <div className="lede">
-      <Hdr title={title} sub={sub} sos={sos} />
-      <aside className="scene">
+    <>
+      <PartnerBar title={title} sub={sub} />
+      <div className="lede">
+        <Hdr title={title} sub={sub} sos={sos} />
+        <aside className="scene">
         <div className="scene-art">
           <img src={scene[1]} alt="" />
           <p className="scene-line">{line || scene[0]}</p>
@@ -87,8 +90,9 @@ function PageArt({ title, sub, sos = false, kind, line, points }) {
             </div>
           ))}
         </div>
-      </aside>
-    </div>
+        </aside>
+      </div>
+    </>
   );
 }
 
@@ -130,11 +134,284 @@ function Welcome() {
         <div className="w-cta">
           <Btn tone="white" onClick={() => go("who")}>Create account</Btn>
           <Btn tone="ghost" onClick={() => go("signin")}>I already have an account</Btn>
-          <div className="w-foot"><Icon n="phone" c="s" />999 and 112 stay one tap away</div>
+          <button type="button" className="w-foot desk-entry" onClick={() => go("partnerJoin")}>
+            <Icon n="plus" c="s" />Join as a partner
+          </button>
           <button type="button" className="w-foot desk-entry" onClick={() => go("partnerGate")}>
             <Icon n="shield2" c="s" />I work at a Makerere desk
           </button>
         </div>
+      </div>
+    </Screen>
+  );
+}
+
+function ServicePicker({ label, placeholder, options, value, onPick, keepValue = true }) {
+  const [text, setText] = useState(value || "");
+  const [open, setOpen] = useState(false);
+  const box = useRef(null);
+
+  useEffect(() => {
+    setText(value || "");
+  }, [value]);
+
+  useEffect(() => {
+    function close(event) {
+      if (!box.current?.contains(event.target)) setOpen(false);
+    }
+    document.addEventListener("pointerdown", close);
+    return () => document.removeEventListener("pointerdown", close);
+  }, []);
+
+  useEffect(() => {
+    if (!open) return;
+    box.current?.querySelector(".service-list")?.scrollIntoView({ block: "nearest" });
+  }, [open, text]);
+
+  const shown = options.filter((item) => item.toLowerCase().includes(text.trim().toLowerCase()));
+
+  return (
+    <Field label={label}>
+      <div className="service-pick" ref={box}>
+        <div className="inp">
+          <Icon n="find" />
+          <input
+            value={text}
+            placeholder={placeholder}
+            autoComplete="off"
+            autoCorrect="off"
+            spellCheck={false}
+            onPointerDown={() => setOpen(true)}
+            onFocus={() => setOpen(true)}
+            onChange={(event) => {
+              const next = event.target.value;
+              setText(next);
+              setOpen(true);
+              if (keepValue && next !== value) onPick("");
+            }}
+          />
+        </div>
+        {open ? (
+          <div className="service-list" role="listbox">
+            {shown.length ? shown.map((item) => (
+              <button
+                type="button"
+                key={item}
+                className={item === value ? "on" : ""}
+                onMouseDown={(event) => event.preventDefault()}
+                onClick={() => {
+                  onPick(item);
+                  setText(keepValue ? item : "");
+                  setOpen(false);
+                  box.current?.querySelector("input")?.blur();
+                }}
+              >
+                {item}
+              </button>
+            )) : <p>No service matches that.</p>}
+          </div>
+        ) : null}
+      </div>
+    </Field>
+  );
+}
+
+function PartnerBar({ title, sub }) {
+  const { back } = useApp();
+  return (
+    <header className="partner-bar">
+      <div className="partner-brand">
+        <button type="button" className="partner-back" onClick={back} aria-label="Back">
+          <Icon n="chevL" />
+        </button>
+        <span className="mark"><Icon n="logo" c="m" /></span>
+        AfriResQ
+      </div>
+      <div className="partner-bar-name">
+        <h2>{title}</h2>
+        {sub ? <small>{sub}</small> : null}
+      </div>
+    </header>
+  );
+}
+
+function PartnerJoin() {
+  const [step, setStep] = useState("kind");
+  const [primary, setPrimary] = useState("");
+  const [extras, setExtras] = useState([]);
+  const [form, setForm] = useState({
+    organisation: "",
+    phone: "",
+    email: "",
+    address: "",
+    districts: "",
+    services: "",
+    hours: "",
+    emergencyReady: false,
+    licence: "",
+    representativeName: "",
+    representativePhone: "",
+    representativeEmail: "",
+  });
+  const [error, setError] = useState("");
+  const [busy, setBusy] = useState(false);
+  const set = (key) => (value) => setForm((current) => ({ ...current, [key]: value }));
+
+  useEffect(() => {
+    const state = window.history.state || {};
+    if (state.screen === "partnerJoin" && !state.step) {
+      window.history.replaceState({ ...state, step: "kind" }, "", window.location.href);
+    }
+    function onPop(event) {
+      if (event.state?.screen !== "partnerJoin") return;
+      const next = event.state.step;
+      setStep(next === "details" || next === "pending" ? next : "kind");
+    }
+    window.addEventListener("popstate", onPop);
+    return () => window.removeEventListener("popstate", onPop);
+  }, []);
+
+  function showStep(next) {
+    setStep(next);
+    const state = window.history.state || {};
+    window.history.pushState(
+      { ...state, screen: "partnerJoin", step: next },
+      "",
+      `${window.location.pathname}${window.location.search}#/partnerJoin`,
+    );
+  }
+
+  function choosePrimary(item) {
+    setPrimary(item);
+    setExtras((current) => current.filter((name) => name !== item));
+  }
+
+  function toggleExtra(item) {
+    setExtras((current) => (current.includes(item) ? current.filter((name) => name !== item) : [...current, item]));
+  }
+
+  async function submit() {
+    setBusy(true);
+    setError("");
+    try {
+      const res = await fetch("/api/partners", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ...form, primaryCategory: primary, extraCategories: extras }),
+      });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(body.error || "The request was not saved.");
+      showStep("pending");
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  if (step === "pending") {
+    return (
+      <Screen>
+        <PartnerBar title="Pending verification" sub={form.organisation} />
+        <div className="body partner-join">
+          <Hdr title="Pending verification" sub={form.organisation} sos={false} />
+          <Note icon="lock">AfriResQ has the request. This organisation will not receive a case until the team confirms it. Call 999 or 112 if someone needs help now.</Note>
+        </div>
+      </Screen>
+    );
+  }
+
+  if (step === "details") {
+    return (
+      <Screen>
+        <PartnerBar title="About the organisation" sub={primary} />
+        <div className="body partner-join">
+          <Hdr title="About the organisation" sub={primary} sos={false} />
+          <div className="form-side">
+            <Field label="Organisation name">
+              <Inp value={form.organisation} placeholder="Registered name" onChange={set("organisation")} />
+            </Field>
+            <Field label="Official telephone">
+              <Inp icon="phone" pre="+256" mode="tel" value={form.phone} placeholder="7XX XXX XXX" onChange={set("phone")} />
+            </Field>
+            <Field label="Official email">
+              <Inp icon="mail" type="email" value={form.email} placeholder="name@organisation.ug" onChange={set("email")} />
+            </Field>
+            <Field label="Physical address">
+              <Inp icon="pin" value={form.address} placeholder="Street and town" onChange={set("address")} />
+            </Field>
+            <Field label="Operating districts">
+              <Inp value={form.districts} placeholder="Kampala, Wakiso" onChange={set("districts")} />
+            </Field>
+            <Field label="Services offered">
+              <textarea className="area" value={form.services} placeholder="For example: medical transport, paramedics, event medical cover" onChange={(event) => set("services")(event.target.value)} />
+            </Field>
+            <Field label="Operating hours">
+              <Inp icon="clock" value={form.hours} placeholder="24 hours, or 8:00 to 17:00" onChange={set("hours")} />
+            </Field>
+            <button type="button" className="card row" onClick={() => set("emergencyReady")(!form.emergencyReady)}>
+              <span className="grow"><b>Available for emergencies outside those hours</b></span>
+              <span className="switch" role="switch" aria-checked={form.emergencyReady} />
+            </button>
+            <Field label="Licence or registration number">
+              <Inp icon="lock" value={form.licence} placeholder="The number on the official document" onChange={set("licence")} />
+            </Field>
+            <Field label="Person who can speak for the organisation">
+              <Inp icon="user" value={form.representativeName} placeholder="Full name" onChange={set("representativeName")} />
+            </Field>
+            <Field label="Their telephone">
+              <Inp icon="phone" pre="+256" mode="tel" value={form.representativePhone} placeholder="7XX XXX XXX" onChange={set("representativePhone")} />
+            </Field>
+            <Field label="Their email">
+              <Inp icon="mail" type="email" value={form.representativeEmail} placeholder="name@organisation.ug" onChange={set("representativeEmail")} />
+            </Field>
+            {extras.length ? <Note>Also offered: {extras.join(", ")}.</Note> : null}
+            <Note icon="lock">The document file itself comes later. A confirmed organisation still does not receive cases until its service is connected.</Note>
+          </div>
+        </div>
+        <div className="foot">
+          {error ? <div className="err" role="alert">{error}</div> : null}
+          <Btn disabled={busy} onClick={submit}>{busy ? "Sending…" : "Submit for verification"}</Btn>
+        </div>
+      </Screen>
+    );
+  }
+
+  return (
+    <Screen>
+      <PartnerBar title="Join as a partner" sub="Choose the main service" />
+      <div className="body partner-join">
+        <Hdr title="Join as a partner" sub="Choose the main service" sos={false} />
+        <div className="form-side">
+          <p className="sub">One organisation can offer more than one service. AfriResQ confirms the request before any case is sent.</p>
+          <ServicePicker
+            label="Main service"
+            placeholder="Type to find a service"
+            options={PARTNER_CATEGORIES}
+            value={primary}
+            onPick={choosePrimary}
+          />
+          {primary ? (
+            <ServicePicker
+              label="Another service, if they offer one"
+              placeholder="Type to add another service"
+              options={PARTNER_CATEGORIES.filter((item) => item !== primary && !extras.includes(item))}
+              value=""
+              keepValue={false}
+              onPick={toggleExtra}
+            />
+          ) : null}
+          {extras.length ? (
+            <div className="chips">
+              {extras.map((item) => (
+                <button type="button" className="chip on" key={item} onClick={() => toggleExtra(item)}>{item}</button>
+              ))}
+            </div>
+          ) : null}
+        </div>
+      </div>
+      <div className="foot">
+        <Btn disabled={!primary} onClick={() => showStep("details")}>Continue</Btn>
       </div>
     </Screen>
   );
@@ -664,8 +941,9 @@ function Report() {
   }, [report.where]);
   return (
     <Screen>
-      <div className="body">
-        <PageArt kind="medical" title="Medical emergency" sub="Four quick questions" sos />
+      <PartnerBar title="Medical emergency" sub="Four quick questions" />
+      <div className="body report-mid">
+        <Hdr title="Medical emergency" sub="Four quick questions" sos />
         <div className="form-side">
         <div className="card" style={{ display: "flex", flexDirection: "column", gap: 10 }}>
           <div className="lbl">1. What is happening?</div>
@@ -1413,6 +1691,8 @@ function AlertView() {
 
 function Account() {
   const { user, student, safety, theme, setTheme, go, openSheet, signOut } = useApp();
+  const photoInput = useRef(null);
+  const [photo, setPhoto] = useState(() => localStorage.getItem("afriresq-photo") || "");
   const rows = [
     ["drop", "red", "Medical card", `${user.med.blood}, ${user.med.share ? "shared during an open case" : "sharing off"}`, () => openSheet("med")],
     ["users", "gold", "Next of kin", `${user.kin.name}, ${user.kin.rel}`, () => openSheet("kin")],
@@ -1420,20 +1700,47 @@ function Account() {
     ["radio", "green", "Safety Net", safety.mode === "always" ? "Always on" : safety.mode === "trips" ? "Trips and cases only" : "Off", () => go("safetyHome", null, true)],
     ["globe", "plain", "Language", user.lang, () => openSheet("lang")],
   ];
+  function choosePhoto(event) {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (!file || !file.type.startsWith("image/")) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      const image = new Image();
+      image.onload = () => {
+        const size = 320;
+        const canvas = document.createElement("canvas");
+        canvas.width = size;
+        canvas.height = size;
+        const side = Math.min(image.width, image.height);
+        canvas.getContext("2d").drawImage(image, (image.width - side) / 2, (image.height - side) / 2, side, side, 0, 0, size, size);
+        const next = canvas.toDataURL("image/jpeg", 0.82);
+        setPhoto(next);
+        try { localStorage.setItem("afriresq-photo", next); } catch { /* the picture stays for this visit */ }
+      };
+      image.src = String(reader.result || "");
+    };
+    reader.readAsDataURL(file);
+  }
   return (
     <Screen tabs>
       <div className="body account">
         <div className="page-bar">
-        <div className="hdr">
-          <div className="grow"><h2>Profile</h2></div>
-          <button type="button" className="sos-pill lap-quiet" onClick={() => openSheet("lines")}><Icon n="phone" c="s" />999 / 112</button>
-        </div>
-        <div className="scard">
-          <span className="pill" style={{ background: "rgba(255,255,255,.2)", color: "#fff" }}>
-            <Icon n={student ? "cap" : "user"} c="s" />{student ? "Verified student" : "Citizen"}
-          </span>
-          <div className="nm">{user.name}</div>
-          <small>{student ? `${user.uni || "Makerere University"}, student no. ${user.studentNo}` : "Phone confirmed by SMS"}</small>
+        <div className="profile-top">
+          <button type="button" className="profile-photo" onClick={() => photoInput.current?.click()}>
+            <span className="profile-circle">
+              {photo ? <img src={photo} alt="" /> : <Icon n="user" />}
+            </span>
+            Profile
+          </button>
+          <input ref={photoInput} type="file" accept="image/*" hidden onChange={choosePhoto} />
+          <div className="scard">
+            <span className="pill" style={{ background: "rgba(255,255,255,.2)", color: "#fff" }}>
+              <Icon n={student ? "cap" : "user"} c="s" />{student ? "Verified student" : "Citizen"}
+            </span>
+            <div className="nm">{user.name}</div>
+            <small>{student ? `${user.uni || "Makerere University"}, student no. ${user.studentNo}` : "Phone confirmed by SMS"}</small>
+          </div>
         </div>
         </div>
         <div className="card list" style={{ padding: "4px 14px" }}>
@@ -1476,6 +1783,7 @@ function Account() {
 
 const screens = {
   welcome: Welcome,
+  partnerJoin: PartnerJoin,
   who: Who,
   phone: Phone,
   universities: Universities,

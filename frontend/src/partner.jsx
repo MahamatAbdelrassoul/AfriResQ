@@ -5,6 +5,25 @@ import { clearDeskSession, closeDesk, openDesk, readDeskSession, saveDeskSession
 import { useApp } from "./app-state.js";
 import { Btn, Field, Hdr, Icon, Inp, MapBoard, Note, Screen } from "./ui.jsx";
 
+function DeskBar({ title, sub, onBack }) {
+  const { back } = useApp();
+  return (
+    <header className="partner-bar">
+      <div className="partner-brand">
+        <button type="button" className="partner-back" onClick={onBack || back} aria-label="Back">
+          <Icon n="chevL" />
+        </button>
+        <span className="mark"><Icon n="logo" c="m" /></span>
+        AfriResQ
+      </div>
+      <div className="partner-bar-name">
+        <h2>{title}</h2>
+        {sub ? <small>{sub}</small> : null}
+      </div>
+    </header>
+  );
+}
+
 function DeskArt({ title, sub, line, points }) {
   return (
     <div className="lede">
@@ -83,6 +102,7 @@ function PartnerGate() {
   return (
     <Screen>
       <div className="body">
+        <DeskBar title="Makerere desks" sub="Choose where you work" />
         <DeskArt
           title="Makerere desks"
           sub="Choose where you work"
@@ -143,6 +163,7 @@ function PartnerSignIn() {
   return (
     <Screen>
       <div className="body">
+        <DeskBar title={desk.short} sub={desk.title} onBack={() => go("partnerGate", null, true)} />
         <DeskArt
           title={desk.short}
           sub={desk.title}
@@ -212,6 +233,7 @@ function PartnerQueue() {
 
   return (
     <Screen>
+      <DeskBar title={desk.short} sub={desk.title} onBack={() => go("partnerGate", null, true)} />
       <div className="body partner-board">
         <div className="partner-top">
           <div className="partner-head">
@@ -337,6 +359,7 @@ function PartnerCase() {
   if (!item) {
     return (
       <Screen>
+        <DeskBar title={desk.short} sub="Opening the case" onBack={() => go("partnerQueue")} />
         <div className="body partner-board">
           <button type="button" className="back" aria-label="Back to cases" onClick={() => go("partnerQueue")}>
             <Icon n="chevL" />
@@ -352,6 +375,7 @@ function PartnerCase() {
 
   return (
     <Screen>
+      <DeskBar title={item.id} sub={item.what} onBack={() => go("partnerQueue")} />
       <div className="body partner-board">
         <div className="partner-head">
           <button type="button" className="back" aria-label="Back to cases" onClick={() => go("partnerQueue")}>

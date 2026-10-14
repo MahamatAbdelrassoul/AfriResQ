@@ -98,6 +98,13 @@ export function adminRouter(pool) {
          order by c.created_at desc
          limit 40`,
       );
+      const applications = await pool.query(
+        `select id, organisation, primary_category, extra_categories, phone, email, address, districts,
+           services, hours, emergency_ready, licence, representative_name, representative_phone, representative_email, status
+         from partner_applications
+         order by created_at desc
+         limit 40`,
+      );
       res.json({
         places: places.rows.map((row) => ({
           id: row.id,
@@ -119,7 +126,53 @@ export function adminRouter(pool) {
           person: row.person_name,
           phone: row.person_phone,
         })),
+        applications: applications.rows.map((row) => ({
+          id: row.id,
+          organisation: row.organisation,
+          primaryCategory: row.primary_category,
+          extraCategories: row.extra_categories || [],
+          phone: row.phone,
+          email: row.email,
+          address: row.address,
+          districts: row.districts,
+          services: row.services,
+          hours: row.hours,
+          emergencyReady: row.emergency_ready,
+          licence: row.licence,
+          representativeName: row.representative_name,
+          representativePhone: row.representative_phone,
+          representativeEmail: row.representative_email,
+          status: row.status,
+        })),
       });
+    } catch {
+      res.status(503).json({ error: "The database is not available." });
+    }
+  });
+
+  router.patch("/partners/:id", async (req, res) => {
+    const status = String(req.body?.status || "");
+    if (status !== "approved" && status !== "declined") {
+      res.status(400).json({ error: "Confirm or decline the request." });
+      return;
+    }
+    try {
+      if (!(await signedIn(pool, req))) {
+        res.status(401).json({ error: "Sign in with the team code first." });
+        return;
+      }
+      const saved = await pool.query(
+        `update partner_applications
+         set status = $2, updated_at = now()
+         where id = $1 and status = 'pending'
+         returning organisation, status`,
+        [req.params.id, status],
+      );
+      if (!saved.rows[0]) {
+        res.status(404).json({ error: "That request is no longer waiting." });
+        return;
+      }
+      res.json({ ok: true, organisation: saved.rows[0].organisation, status: saved.rows[0].status });
     } catch {
       res.status(503).json({ error: "The database is not available." });
     }

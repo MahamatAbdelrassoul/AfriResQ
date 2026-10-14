@@ -112,3 +112,26 @@ create table if not exists admin_sessions (
   token text primary key,
   expires_at timestamptz not null
 );
+
+-- A partner asks to receive cases. Nothing is assigned until the team confirms.
+create table if not exists partner_applications (
+  id uuid primary key default gen_random_uuid(),
+  organisation text not null,
+  primary_category text not null,
+  extra_categories text[] not null default '{}',
+  phone text not null,
+  email text not null,
+  address text not null,
+  districts text not null default '',
+  services text not null default '',
+  hours text not null default '',
+  emergency_ready boolean not null default false,
+  licence text not null default '',
+  representative_name text not null,
+  representative_phone text not null,
+  representative_email text not null default '',
+  status text not null default 'pending' check (status in ('pending', 'approved', 'declined')),
+  availability text not null default 'offline' check (availability in ('available', 'busy', 'unavailable', 'offline')),
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);

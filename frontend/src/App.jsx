@@ -182,7 +182,7 @@ export default function App() {
       window.history.back();
       return;
     }
-    const fallback = ["who", "phone", "universities", "email", "code", "signin"].includes(screenRef.current) ? "welcome" : "home";
+    const fallback = ["who", "phone", "universities", "email", "code", "signin", "partnerJoin"].includes(screenRef.current) ? "welcome" : "home";
     go(fallback, null, true);
   }, [go]);
 
@@ -535,7 +535,7 @@ export default function App() {
 
   return (
     <AppState.Provider value={value}>
-      <div className="app" data-tabs={["home", "places", "safetyHome", "account"].includes(screen) ? "1" : "0"} data-shell={["welcome", "who", "phone", "universities", "email", "code", "profile1", "profile2", "profile3", "safety", "signin", "welcomeBack", "partnerGate", "partnerSignin", "partnerQueue", "partnerCase"].includes(screen) ? "0" : "1"} data-lightstatus={["welcome", "welcomeBack"].includes(screen) ? "1" : "0"}>
+      <div className="app" data-tabs={["home", "places", "safetyHome", "account"].includes(screen) ? "1" : "0"} data-shell={["welcome", "who", "phone", "universities", "email", "code", "profile1", "profile2", "profile3", "safety", "signin", "welcomeBack", "partnerJoin", "partnerGate", "partnerSignin", "partnerQueue", "partnerCase"].includes(screen) ? "0" : "1"} data-lightstatus={["welcome", "welcomeBack"].includes(screen) ? "1" : "0"}>
         <Sprite />
         <CurrentScreen />
         <TabBar />

@@ -275,5 +275,6 @@ h1,h2,h3,h4,p{margin:0}
 .hot [data-go],.hot [data-back]{outline:2px dashed #F4C25B;outline-offset:3px;position:relative}
 .hot [data-go]::after,.hot [data-back]::after{content:"Goes to: " attr(data-to);position:absolute;right:2px;top:-12px;background:#111;color:#FFE08A;font:700 10px var(--font);padding:2px 7px;border-radius:7px;white-space:nowrap;z-index:50;pointer-events:none;line-height:1.4}
 .hot .tab[data-go]::after{right:auto;left:50%;transform:translateX(-50%);top:-24px}
-button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-visible{outline:3px solid #F4C25B;outline-offset:2px}
+button:focus-visible{outline:3px solid var(--green);outline-offset:2px}
+input:focus-visible,select:focus-visible,textarea:focus-visible{outline:none}
 @media (prefers-reduced-motion:reduce){*,*::before,*::after{animation:none!important;transition-duration:.01ms!important}}

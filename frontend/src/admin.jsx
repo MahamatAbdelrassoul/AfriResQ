@@ -95,6 +95,30 @@ export default function Team() {
     }).catch(() => {});
   }
 
+  async function decide(id, status) {
+    setBusy(true);
+    setNotice("");
+    try {
+      const res = await fetch(`/api/admin/partners/${id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ status }),
+      });
+      const body = await readBody(res);
+      setNotice(status === "approved"
+        ? `${body.organisation} is confirmed. It will not receive cases until its service is connected.`
+        : `${body.organisation} was declined.`);
+      setOverview((current) => (current ? {
+        ...current,
+        applications: (current.applications || []).map((item) => (item.id === id ? { ...item, status } : item)),
+      } : current));
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function saveCode(placeId) {
     const next = String(drafts[placeId] || "").trim();
     setBusy(true);
@@ -143,6 +167,36 @@ export default function Team() {
           {error ? <div className="err" role="alert">{error}</div> : null}
           <div className="team-grid">
             <section className="team-col">
+              <h2>Partner requests</h2>
+              <div className="team-desks">
+                {(overview.applications || []).length ? (overview.applications || []).map((item) => (
+                  <article className="team-card" key={item.id}>
+                    <div className="team-desk">
+                      <span className="grow">
+                        <b>{item.organisation}</b>
+                        <small>{item.primaryCategory}{item.extraCategories.length ? ` · also ${item.extraCategories.join(", ")}` : ""}</small>
+                        <small>{item.phone} · {item.email}</small>
+                        <small>{item.address}{item.districts ? ` · ${item.districts}` : ""}</small>
+                        <small>{item.representativeName} · {item.representativePhone}</small>
+                      </span>
+                      <em className={`bd ${item.status === "approved" ? "ok" : item.status === "declined" ? "warn" : ""}`}>
+                        {item.status === "approved" ? "Confirmed" : item.status === "declined" ? "Declined" : "Pending"}
+                      </em>
+                    </div>
+                    {item.status === "pending" ? (
+                      <div className="team-code">
+                        <button type="button" className="btn pri sm" disabled={busy} onClick={() => decide(item.id, "approved")}>Confirm</button>
+                        <button type="button" className="btn out sm" disabled={busy} onClick={() => decide(item.id, "declined")}>Decline</button>
+                      </div>
+                    ) : null}
+                  </article>
+                )) : (
+                  <article className="team-card">
+                    <b>No partner requests yet</b>
+                    <small style={{ color: "var(--ink2)", fontWeight: 600 }}>A hospital, a police station, or another service appears here after it asks to join.</small>
+                  </article>
+                )}
+              </div>
               <h2>Desks</h2>
               <div className="team-desks">
                 {desks.map((place) => (

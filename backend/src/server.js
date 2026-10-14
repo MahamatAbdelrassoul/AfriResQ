@@ -8,6 +8,7 @@ import { adminRouter, seedAdmin } from "./admin.js";
 import { casesRouter } from "./cases.js";
 import { deskRouter, seedDeskCodes } from "./desks.js";
 import { peopleRouter } from "./people.js";
+import { partnerRouter } from "./partners.js";
 import { placesRouter } from "./places.js";
 
 const envPath = join(dirname(fileURLToPath(import.meta.url)), "..", ".env");
@@ -29,6 +30,7 @@ app.use(express.json());
 app.use("/api/people", peopleRouter(pool));
 app.use("/api/cases", casesRouter(pool));
 app.use("/api/places", placesRouter(pool));
+app.use("/api/partners", partnerRouter(pool));
 app.use("/api/desk", deskRouter(pool));
 app.use("/api/admin", adminRouter(pool));
 
