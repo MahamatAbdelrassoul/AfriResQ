@@ -655,9 +655,10 @@ button.desk-entry {
   .scene-art img {
     display: block;
     width: 100%;
-    height: 248px;
-    object-fit: cover;
-    object-position: 72% center;
+    height: 280px;
+    object-fit: contain;
+    object-position: right center;
+    background: transparent;
   }
 
   .scene-line {

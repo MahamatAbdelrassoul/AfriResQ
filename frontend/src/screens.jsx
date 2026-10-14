@@ -5,18 +5,18 @@ import { HOME, ROUTES, STEPS, TRAIL, YOU, pointAlong } from "./map.js";
 import { PartnerCase, PartnerGate, PartnerQueue, PartnerSignIn } from "./partner.jsx";
 import { PARTNER_CATEGORIES } from "./partner-categories.js";
 import { Btn, Field, Hdr, Icon, Inp, MapBoard, Note, Screen, Steps } from "./ui.jsx";
-import accidentArt from "./assets/scenes/scene-accident.jpg";
-import fireArt from "./assets/scenes/scene-fire.jpg";
-import securityArt from "./assets/scenes/scene-security.jpg";
-import missingArt from "./assets/scenes/scene-missing.jpg";
-import disasterArt from "./assets/scenes/scene-disaster.jpg";
-import generalArt from "./assets/scenes/scene-general.jpg";
-import medicalArt from "./assets/scenes/scene-medical.jpg";
-import walkArt from "./assets/scenes/scene-walk.jpg";
-import joinArt from "./assets/scenes/scene-join.jpg";
-import universityArt from "./assets/scenes/scene-university.jpg";
-import profileArt from "./assets/scenes/scene-profile.jpg";
-import safetyArt from "./assets/scenes/scene-safety.jpg";
+import accidentArt from "./assets/scenes/scene-accident.png";
+import fireArt from "./assets/scenes/scene-fire.png";
+import securityArt from "./assets/scenes/scene-security.png";
+import missingArt from "./assets/scenes/scene-missing.png";
+import disasterArt from "./assets/scenes/scene-disaster.png";
+import generalArt from "./assets/scenes/scene-general.png";
+import medicalArt from "./assets/scenes/scene-medical.png";
+import walkArt from "./assets/scenes/scene-walk.png";
+import joinArt from "./assets/scenes/scene-join.png";
+import universityArt from "./assets/scenes/scene-university.png";
+import profileArt from "./assets/scenes/scene-profile.png";
+import safetyArt from "./assets/scenes/scene-safety.png";
 
 const UNIS = [
   ["Makerere University", "Kampala", 1, "mak.ac.ug"],
