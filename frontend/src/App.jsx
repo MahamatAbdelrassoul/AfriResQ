@@ -31,12 +31,22 @@ function loadAccount() {
   }
 }
 
+const OPEN_SCREENS = new Set(["welcome", "signin", "welcomeBack", "partnerGate", "home", "places", "safetyHome", "account"]);
+
+function screenFromAddress(profileDone) {
+  const name = window.location.hash.replace(/^#\//, "").split(/[/?#]/)[0];
+  if (!OPEN_SCREENS.has(name)) return "";
+  if (["home", "places", "safetyHome", "account"].includes(name) && !profileDone) return "";
+  return name;
+}
+
 export default function App() {
   const saved = useMemo(() => loadAccount(), []);
+  const opened = screenFromAddress(Boolean(saved?.profileDone));
   const [user, setUser] = useState(saved?.user || studentSeed);
   const [profileDone, setProfileDone] = useState(Boolean(saved?.profileDone));
-  const [screen, setScreen] = useState(saved?.profileDone ? "welcomeBack" : "welcome");
-  const [stack, setStack] = useState(saved?.profileDone ? ["welcomeBack"] : ["welcome"]);
+  const [screen, setScreen] = useState(opened || (saved?.profileDone ? "welcomeBack" : "welcome"));
+  const [stack, setStack] = useState([opened || (saved?.profileDone ? "welcomeBack" : "welcome")]);
   const [theme, setThemeState] = useState(localStorage.getItem("afriresq-appearance") || "light");
   const [flow, setFlow] = useState("signup");
   const [uni, setUni] = useState("Makerere University");

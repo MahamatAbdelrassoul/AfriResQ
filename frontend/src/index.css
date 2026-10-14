@@ -685,3 +685,69 @@ button.desk-entry {
     align-items: start;
   }
 }
+
+.w,
+.bk {
+  min-height: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: none;
+}
+
+.w::-webkit-scrollbar,
+.bk::-webkit-scrollbar {
+  display: none;
+}
+
+.w-card,
+.w-card .map {
+  pointer-events: none;
+}
+
+.form-main {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  min-width: 0;
+}
+
+.form-main > * {
+  flex-shrink: 0;
+}
+
+@media (max-width: 959px) {
+  .modes {
+    gap: 14px;
+  }
+
+  .form-side > *,
+  .lede > *,
+  .arrive-main > *,
+  .panel > * {
+    flex-shrink: 0;
+  }
+
+  .foot {
+    flex-shrink: 0;
+  }
+
+  .screen.bare:has(> .panel) > .mapfull {
+    flex: none;
+    height: 240px;
+    min-height: 0;
+  }
+
+  .screen.bare:has(> .panel) > .panel {
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow-x: hidden;
+    overflow-y: auto;
+    scrollbar-width: none;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .screen.bare:has(> .panel) > .panel::-webkit-scrollbar {
+    display: none;
+  }
+}

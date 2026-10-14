@@ -748,16 +748,16 @@ function Help() {
         <div className={`modes ${student ? "c3" : "c2"}`}>
           {student ? (
             <button type="button" className={`mode uni${active === "uni" ? " on" : ""}`} onClick={() => setMode("uni")}>
-              <span className="ico violet" style={{ width: 34, height: 34, borderRadius: 11 }}><Icon n="cap" c="m" /></span>
+              <span className="ico violet" style={{ width: 28, height: 28, borderRadius: 10 }}><Icon n="cap" c="s" /></span>
               My university hospital<small>Listed first</small>
             </button>
           ) : null}
           <button type="button" className={`mode${active === "nearest" ? " on" : ""}`} onClick={() => setMode("nearest")}>
-            <span className="ico green" style={{ width: 34, height: 34, borderRadius: 11 }}><Icon n="pin" c="m" /></span>
+            <span className="ico green" style={{ width: 28, height: 28, borderRadius: 10 }}><Icon n="pin" c="s" /></span>
             Nearest place<small>Nearest first</small>
           </button>
           <button type="button" className={`mode${active === "self" ? " on" : ""}`} onClick={() => setMode("self")}>
-            <span className="ico green" style={{ width: 34, height: 34, borderRadius: 11 }}><Icon n="route" c="m" /></span>
+            <span className="ico green" style={{ width: 28, height: 28, borderRadius: 10 }}><Icon n="route" c="s" /></span>
             Go there myself<small>Route and time</small>
           </button>
         </div>
