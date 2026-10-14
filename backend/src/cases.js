@@ -1,4 +1,5 @@
 import { Router } from "express";
+import { personFromRequest, ugandaPhone } from "./auth.js";
 import { deskFromRequest } from "./desks.js";
 
 const STATES = new Set(["sent", "accepted", "on_the_way", "arrived", "closed", "cancelled"]);
@@ -75,15 +76,10 @@ export function casesRouter(pool) {
 
   router.post("/", async (req, res) => {
     const body = req.body || {};
-    const phoneDigits = digits(body.phone);
     const kind = text(body.kind);
     const path = text(body.path);
     const what = text(body.what);
     const state = text(body.state) || "sent";
-    if (phoneDigits.length < 9) {
-      res.status(400).json({ error: "A case needs the person's phone number." });
-      return;
-    }
     if (!KINDS.has(kind)) {
       res.status(400).json({ error: "Say whether this case is medical or another desk." });
       return;
@@ -103,9 +99,25 @@ export function casesRouter(pool) {
     const lat = Number(body.whereLat);
     const lng = Number(body.whereLng);
     try {
-      const person = await pool.query("select 1 from people where phone_digits = $1", [phoneDigits]);
+      // The case belongs to whoever is signed in. A phone number in the body proves nothing.
+      const me = await personFromRequest(pool, req);
+      if (!me) {
+        res.status(401).json({ error: "Sign in again to send a case. In an emergency, call 999 or 112 now." });
+        return;
+      }
+      const phoneDigits = me.phoneDigits;
+      const claimed = ugandaPhone(body.phone);
+      if (claimed && claimed.national !== phoneDigits) {
+        res.status(403).json({ error: "A case can only be sent from your own account." });
+        return;
+      }
+      const person = await pool.query("select blocked from people where phone_digits = $1", [phoneDigits]);
       if (!person.rows[0]) {
         res.status(409).json({ error: "Save the profile before opening a case." });
+        return;
+      }
+      if (person.rows[0].blocked) {
+        res.status(403).json({ error: "This number cannot send cases through AfriResQ. In an emergency, call 999 or 112." });
         return;
       }
       const saved = await pool.query(
@@ -166,8 +178,13 @@ export function casesRouter(pool) {
         return;
       }
       const desk = await deskFromRequest(pool, req);
-      const ownPhone = digits(body.phone) === current.phone_digits && digits(body.phone).length >= 9;
+      const me = desk ? null : await personFromRequest(pool, req);
+      const ownPhone = me?.phoneDigits === current.phone_digits;
       const ownDesk = desk?.place_id === current.place_id;
+      if (!ownPhone && !ownDesk) {
+        res.status(401).json({ error: "Sign in to see or change this case." });
+        return;
+      }
       if (state === "accepted" || state === "on_the_way" || state === "arrived") {
         if (!ownDesk) {
           res.status(401).json({ error: "Sign in to this desk first." });
@@ -228,8 +245,15 @@ export function casesRouter(pool) {
         res.status(404).json({ error: "No case is saved with that number." });
         return;
       }
+      // Case numbers count up, so anyone could guess one. Only the sender and the desk may open it.
       const desk = await deskFromRequest(pool, req);
-      res.json(fromRow(row, desk?.place_id === row.place_id));
+      const ownDesk = desk?.place_id === row.place_id;
+      const me = ownDesk ? null : await personFromRequest(pool, req);
+      if (!ownDesk && me?.phoneDigits !== row.phone_digits) {
+        res.status(404).json({ error: "No case is saved with that number." });
+        return;
+      }
+      res.json(fromRow(row, ownDesk));
     } catch {
       res.status(503).json({ error: "The database is not available." });
     }
@@ -248,6 +272,12 @@ export function casesRouter(pool) {
         const desk = await deskFromRequest(pool, req);
         if (desk?.place_id !== placeId) {
           res.status(401).json({ error: "Sign in to this desk first." });
+          return;
+        }
+      } else {
+        const me = await personFromRequest(pool, req);
+        if (!me || me.phoneDigits !== (ugandaPhone(req.query.phone)?.national || phoneDigits)) {
+          res.status(401).json({ error: "Sign in to see your cases." });
           return;
         }
       }

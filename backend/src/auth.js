@@ -50,6 +50,16 @@ export async function authSession(pool, token) {
   return found.rows[0] || null;
 }
 
+// The person behind a request, proven by the SMS or student-email sign-in.
+// A phone number in the request body proves nothing: anyone can type one.
+export async function personFromRequest(pool, req) {
+  const session = await authSession(pool, bearer(req));
+  if (!session) return null;
+  if (session.channel === "sms") return { phoneDigits: session.destination };
+  const found = await pool.query("select phone_digits from people where lower(email) = $1", [session.destination]);
+  return found.rows[0] ? { phoneDigits: found.rows[0].phone_digits } : null;
+}
+
 export function authRouter(pool) {
   const router = Router();
 

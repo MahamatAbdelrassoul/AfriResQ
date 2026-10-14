@@ -1,59 +1,124 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import sprite from "./sprite.html?raw";
+import { SignedOut, ago, readSession, saveSession, teamCall } from "./admin-api.js";
+import { CasesPanel, Icon, PartnersPanel, PeoplePanel, PlacesPanel, SecurityPanel } from "./admin-panels.jsx";
 
-const KEY = "afriresq-admin";
+const TABS = [
+  ["overview", "Overview", "home"],
+  ["cases", "Cases", "alert"],
+  ["people", "People", "users"],
+  ["places", "Places", "pin"],
+  ["partners", "Partners", "plus"],
+  ["security", "Security", "lock"],
+];
 
-function Icon({ n, c = "" }) {
+function readTab() {
+  const name = window.location.hash.replace(/^#\/?/, "");
+  return TABS.some(([id]) => id === name) ? name : "overview";
+}
+
+function Tile({ label, value, note, tone = "", onClick }) {
   return (
-    <svg className={`i ${c}`} aria-hidden="true">
-      <use href={`#i-${n}`} />
-    </svg>
+    <button type="button" className={`team-tile ${tone}`} onClick={onClick}>
+      <small>{label}</small>
+      <b>{value}</b>
+      {note ? <span>{note}</span> : null}
+    </button>
   );
 }
 
-function readSession() {
-  return sessionStorage.getItem(KEY) || "";
-}
+function Overview({ token, stats, version, go, onFail }) {
+  const [late, setLate] = useState(null);
 
-async function readBody(res) {
-  const body = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(body.error || "The team page could not be opened.");
-  return body;
-}
+  useEffect(() => {
+    let stop = false;
+    teamCall(token, "/cases?state=waiting")
+      .then((rows) => { if (!stop) setLate(rows.slice(0, 6)); })
+      .catch((err) => { if (!stop) onFail(err); });
+    return () => { stop = true; };
+  }, [token, version, stats.waiting]);
 
-function stateClass(state) {
-  if (state === "sent") return "warn";
-  if (state === "closed" || state === "cancelled") return "";
-  return "ok";
+  return (
+    <section className="team-panel">
+      <div className="team-tiles">
+        <Tile label="Open cases" value={stats.open} note={`${stats.today} sent today`} onClick={() => go("cases")} />
+        <Tile
+          label="Waiting for a desk"
+          value={stats.waiting}
+          note={stats.late ? `${stats.late} waiting over ${stats.lateMinutes} min` : "No one waiting long"}
+          tone={stats.late ? "alarm" : stats.waiting ? "warn" : ""}
+          onClick={() => go("cases", "waiting")}
+        />
+        <Tile label="Desks signed in" value={stats.desks_online} note="Right now" onClick={() => go("places")} />
+        <Tile label="People" value={stats.people} note={`${stats.students} students`} onClick={() => go("people")} />
+        <Tile label="Partner requests" value={stats.pending_partners} note="Waiting for the team" tone={stats.pending_partners ? "warn" : ""} onClick={() => go("partners")} />
+        <Tile label="Blocked numbers" value={stats.blocked} note={stats.rating ? `Average rating ${stats.rating} of 5` : `${stats.closed} cases closed`} onClick={() => go("people")} />
+      </div>
+      <h2 className="team-h2">Waiting for a desk</h2>
+      <div className="team-list">
+        {late == null ? <p className="sub">Loading…</p> : null}
+        {late && !late.length ? (
+          <article className="team-card">
+            <b>No one is waiting</b>
+            <small className="team-muted">Every case has been taken by a desk.</small>
+          </article>
+        ) : null}
+        {(late || []).map((item) => {
+          const minutes = (Date.now() - new Date(item.createdAt).getTime()) / 60000;
+          return (
+            <button type="button" className="team-case" key={item.id} onClick={() => go("cases", "waiting")}>
+              <em className={`bd ${minutes > stats.lateMinutes ? "warn" : ""}`}>{ago(item.createdAt)}</em>
+              <span className="t">
+                <b>{item.id}<span> · {item.what}</span></b>
+                <small>{item.person} · {item.placeShort || "No place"} · {item.whereText || "Location sent with the case"}</small>
+              </span>
+              <Icon n="chevR" c="chev" />
+            </button>
+          );
+        })}
+      </div>
+    </section>
+  );
 }
 
 export default function Team() {
   const [token, setToken] = useState(readSession);
   const [code, setCode] = useState("");
   const [error, setError] = useState("");
+  const [notice, setNotice] = useState("");
   const [busy, setBusy] = useState(false);
   const [overview, setOverview] = useState(null);
-  const [drafts, setDrafts] = useState({});
-  const [notice, setNotice] = useState("");
+  const [tab, setTab] = useState(readTab);
+  const [caseFilter, setCaseFilter] = useState("open");
+  const [version, setVersion] = useState(0);
+
+  const signOutHere = useCallback((message) => {
+    saveSession("");
+    setToken("");
+    setOverview(null);
+    setError(message || "");
+  }, []);
+
+  const onFail = useCallback((err) => {
+    if (err instanceof SignedOut) signOutHere(err.message);
+    else setError(err.message);
+  }, [signOutHere]);
+
+  useEffect(() => {
+    const onHash = () => setTab(readTab());
+    window.addEventListener("hashchange", onHash);
+    return () => window.removeEventListener("hashchange", onHash);
+  }, []);
 
   useEffect(() => {
     if (!token) return undefined;
     let stop = false;
     const load = async () => {
       try {
-        const res = await fetch("/api/admin/overview", { headers: { Authorization: `Bearer ${token}` } });
-        const body = await readBody(res);
-        if (!stop) {
-          setOverview(body);
-          setError("");
-        }
+        const body = await teamCall(token, "/overview");
+        if (!stop) setOverview(body);
       } catch (err) {
-        if (stop) return;
-        if (String(err.message).includes("Sign in")) {
-          sessionStorage.removeItem(KEY);
-          setToken("");
-        }
-        setError(err.message);
+        if (!stop) onFail(err);
       }
     };
     load();
@@ -62,18 +127,39 @@ export default function Team() {
       stop = true;
       clearInterval(id);
     };
-  }, [token]);
+  }, [token, version, onFail]);
+
+  function go(next, filter) {
+    if (filter) setCaseFilter(filter);
+    else if (next === "cases") setCaseFilter("open");
+    setNotice("");
+    setError("");
+    window.location.hash = `/${next}`;
+    setTab(next);
+    window.scrollTo({ top: 0 });
+  }
+
+  // Runs one change, shows what happened, and reloads every list on the page.
+  async function act(change) {
+    setBusy(true);
+    setError("");
+    setNotice("");
+    try {
+      const message = await change();
+      if (message) setNotice(message);
+      setVersion((v) => v + 1);
+    } catch (err) {
+      onFail(err);
+    } finally {
+      setBusy(false);
+    }
+  }
 
   async function signIn() {
     setBusy(true);
     try {
-      const res = await fetch("/api/admin/session", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ code }),
-      });
-      const body = await readBody(res);
-      sessionStorage.setItem(KEY, body.token);
+      const body = await teamCall("", "/session", { method: "POST", body: { code } });
+      saveSession(body.token);
       setToken(body.token);
       setCode("");
       setError("");
@@ -86,61 +172,11 @@ export default function Team() {
 
   async function leave() {
     const current = token;
-    sessionStorage.removeItem(KEY);
-    setToken("");
-    setOverview(null);
-    await fetch("/api/admin/session", {
-      method: "DELETE",
-      headers: { Authorization: `Bearer ${current}` },
-    }).catch(() => {});
+    signOutHere("");
+    await teamCall(current, "/session", { method: "DELETE" }).catch(() => {});
   }
 
-  async function decide(id, status) {
-    setBusy(true);
-    setNotice("");
-    try {
-      const res = await fetch(`/api/admin/partners/${id}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ status }),
-      });
-      const body = await readBody(res);
-      setNotice(status === "approved"
-        ? `${body.organisation} is confirmed. It will not receive cases until its service is connected.`
-        : `${body.organisation} was declined.`);
-      setOverview((current) => (current ? {
-        ...current,
-        applications: (current.applications || []).map((item) => (item.id === id ? { ...item, status } : item)),
-      } : current));
-    } catch (err) {
-      setError(err.message);
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function saveCode(placeId) {
-    const next = String(drafts[placeId] || "").trim();
-    setBusy(true);
-    setNotice("");
-    try {
-      const res = await fetch(`/api/admin/desks/${encodeURIComponent(placeId)}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ code: next }),
-      });
-      const body = await readBody(res);
-      setDrafts((current) => ({ ...current, [placeId]: "" }));
-      setNotice(`${body.name} will use the new code. The old one has stopped.`);
-    } catch (err) {
-      setError(err.message);
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  const desks = (overview?.places || []).filter((place) => place.receives);
-  const listed = (overview?.places || []).filter((place) => !place.receives);
+  const panelProps = { token, version, act, busy, onFail };
 
   return (
     <>
@@ -158,111 +194,25 @@ export default function Team() {
               </div>
               <button type="button" className="btn out sm" onClick={leave}>Leave</button>
             </div>
+            <nav className="team-tabs" aria-label="Team page sections">
+              {TABS.map(([id, label, icon]) => (
+                <button type="button" key={id} className={tab === id ? "on" : ""} aria-current={tab === id ? "page" : undefined} onClick={() => go(id)}>
+                  <Icon n={icon} c="s" />
+                  {label}
+                  {id === "cases" && overview.stats.waiting ? <i>{overview.stats.waiting}</i> : null}
+                  {id === "partners" && overview.stats.pending_partners ? <i>{overview.stats.pending_partners}</i> : null}
+                </button>
+              ))}
+            </nav>
           </header>
-          <div className="team-lead">
-            <small>For the people who run AfriResQ</small>
-            <h1>The desks you control.</h1>
-          </div>
           {notice ? <div className="note team-note"><Icon n="check" c="m" /><span>{notice}</span></div> : null}
-          {error ? <div className="err" role="alert">{error}</div> : null}
-          <div className="team-grid">
-            <section className="team-col">
-              <h2>Partner requests</h2>
-              <div className="team-desks">
-                {(overview.applications || []).length ? (overview.applications || []).map((item) => (
-                  <article className="team-card" key={item.id}>
-                    <div className="team-desk">
-                      <span className="grow">
-                        <b>{item.organisation}</b>
-                        <small>{item.primaryCategory}{item.extraCategories.length ? ` · also ${item.extraCategories.join(", ")}` : ""}</small>
-                        <small>{item.phone} · {item.email}</small>
-                        <small>{item.address}{item.districts ? ` · ${item.districts}` : ""}</small>
-                        <small>{item.representativeName} · {item.representativePhone}</small>
-                      </span>
-                      <em className={`bd ${item.status === "approved" ? "ok" : item.status === "declined" ? "warn" : ""}`}>
-                        {item.status === "approved" ? "Confirmed" : item.status === "declined" ? "Declined" : "Pending"}
-                      </em>
-                    </div>
-                    {item.status === "pending" ? (
-                      <div className="team-code">
-                        <button type="button" className="btn pri sm" disabled={busy} onClick={() => decide(item.id, "approved")}>Confirm</button>
-                        <button type="button" className="btn out sm" disabled={busy} onClick={() => decide(item.id, "declined")}>Decline</button>
-                      </div>
-                    ) : null}
-                  </article>
-                )) : (
-                  <article className="team-card">
-                    <b>No partner requests yet</b>
-                    <small style={{ color: "var(--ink2)", fontWeight: 600 }}>A hospital, a police station, or another service appears here after it asks to join.</small>
-                  </article>
-                )}
-              </div>
-              <h2>Desks</h2>
-              <div className="team-desks">
-                {desks.map((place) => (
-                  <article className="team-card" key={place.id}>
-                    <div className="team-desk">
-                      <span className={`ico ${place.kind === "police" ? "violet" : "green"}`}>
-                        <Icon n={place.kind === "police" ? "shield2" : "plus"} />
-                      </span>
-                      <span className="grow">
-                        <b>{place.name}</b>
-                        <small>{place.open} open · {place.closed} closed</small>
-                      </span>
-                      <em className="bd ok">Receives</em>
-                    </div>
-                    <div className="team-code">
-                      <div className="inp">
-                        <Icon n="lock" c="m" />
-                        <input
-                          type="password"
-                          inputMode="numeric"
-                          placeholder="New desk code"
-                          autoComplete="off"
-                          value={drafts[place.id] || ""}
-                          onChange={(event) => setDrafts((current) => ({ ...current, [place.id]: event.target.value }))}
-                        />
-                      </div>
-                      <button type="button" className="btn pri sm" disabled={busy || !drafts[place.id]} onClick={() => saveCode(place.id)}>Save</button>
-                    </div>
-                  </article>
-                ))}
-              </div>
-              {listed.length ? (
-                <div className="team-places">
-                  <h2>Listed only</h2>
-                  {listed.map((place) => (
-                    <div className="team-place" key={place.id}>
-                      <span className="ico plain"><Icon n="pin" /></span>
-                      <span className="grow">
-                        <b>{place.name}</b>
-                        <small>People can call and follow a route. This place does not receive a demand.</small>
-                      </span>
-                    </div>
-                  ))}
-                </div>
-              ) : null}
-            </section>
-            <section className="team-col">
-              <h2>Cases</h2>
-              <div className="team-list">
-                {overview.cases.length ? overview.cases.map((item) => (
-                  <div className="team-case" key={item.id}>
-                    <em className={`bd ${stateClass(item.state)}`}>{item.stateLabel}</em>
-                    <span className="t">
-                      <b>{item.id}<span> · {item.what}</span></b>
-                      <small>{item.person} · {item.phone} · {item.whereText || item.desk}</small>
-                    </span>
-                  </div>
-                )) : (
-                  <div className="team-card">
-                    <b>No cases yet</b>
-                    <small style={{ color: "var(--ink2)", fontWeight: 600 }}>A demand shows up here after someone sends one.</small>
-                  </div>
-                )}
-              </div>
-            </section>
-          </div>
+          {error ? <div className="err team-note" role="alert">{error}</div> : null}
+          {tab === "overview" ? <Overview token={token} stats={overview.stats} version={version} go={go} onFail={onFail} /> : null}
+          {tab === "cases" ? <CasesPanel key={caseFilter} {...panelProps} places={overview.places} initialFilter={caseFilter} /> : null}
+          {tab === "people" ? <PeoplePanel {...panelProps} /> : null}
+          {tab === "places" ? <PlacesPanel {...panelProps} places={overview.places} /> : null}
+          {tab === "partners" ? <PartnersPanel {...panelProps} applications={overview.applications} /> : null}
+          {tab === "security" ? <SecurityPanel {...panelProps} /> : null}
         </main>
       ) : (
         <main className="team">

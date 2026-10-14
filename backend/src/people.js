@@ -1,5 +1,5 @@
 import { Router } from "express";
-import { authSession, isStudentEmail, sessionToken, ugandaPhone } from "./auth.js";
+import { authSession, isStudentEmail, personFromRequest, sessionToken, ugandaPhone } from "./auth.js";
 
 function digits(phone) {
   return String(phone || "").replace(/\D/g, "");
@@ -176,9 +176,19 @@ export function peopleRouter(pool) {
       return;
     }
     try {
+      // A profile holds the medical card and next of kin, so only its owner may read it.
+      const me = await personFromRequest(pool, req);
+      if (!me) {
+        res.status(401).json({ error: "Sign in again to open this profile." });
+        return;
+      }
       const found = phoneDigits.length >= 9
         ? await pool.query("select * from people where phone_digits = $1", [phoneDigits])
         : await pool.query("select * from people where lower(email) = $1", [email]);
+      if (found.rows[0] && found.rows[0].phone_digits !== me.phoneDigits) {
+        res.status(403).json({ error: "This profile belongs to someone else." });
+        return;
+      }
       if (!found.rows[0]) {
         res.status(404).json({ error: "No person is saved with those details." });
         return;

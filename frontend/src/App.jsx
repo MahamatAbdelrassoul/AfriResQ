@@ -113,9 +113,9 @@ export default function App() {
   }, [nearKey]);
 
   useEffect(() => {
-    if (!saved?.profileDone || !saved.user?.phone) return undefined;
+    if (!saved?.profileDone || !saved.user?.phone || !authToken) return undefined;
     let ignore = false;
-    findPerson({ phone: saved.user.phone })
+    findPerson({ phone: saved.user.phone }, authToken)
       .then((found) => {
         if (ignore || !found?.profileDone) return;
         setUser(found.user);
@@ -533,7 +533,7 @@ export default function App() {
           otherType: fields.otherType || "",
           detail: fields.detail || "",
           state: fields.state || "sent",
-        });
+        }, authToken);
         caseRef.current = saved;
         setKase(saved);
         return true;
@@ -546,7 +546,7 @@ export default function App() {
       const current = caseRef.current;
       if (!current?.id) return false;
       try {
-        const saved = await updateCase(current.id, { ...patch, phone: user.phone });
+        const saved = await updateCase(current.id, patch, authToken);
         caseRef.current = saved;
         setKase(saved);
         return true;
@@ -563,7 +563,7 @@ export default function App() {
       const id = caseRef.current?.id;
       if (!id) return null;
       try {
-        const saved = await getCase(id);
+        const saved = await getCase(id, authToken);
         if (!saved) return null;
         caseRef.current = saved;
         setKase(saved);

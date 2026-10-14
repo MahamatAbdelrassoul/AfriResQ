@@ -180,6 +180,21 @@ create table if not exists auth_sessions (
   created_at timestamptz not null default now()
 );
 
+-- The team can stop a number from sending new cases, for example after false alarms.
+alter table people add column if not exists blocked boolean not null default false;
+alter table people add column if not exists blocked_reason text not null default '';
+
+-- Every change made from the team page, newest first. It is never edited.
+create table if not exists admin_log (
+  id bigint generated always as identity primary key,
+  action text not null,
+  target text not null default '',
+  detail text not null default '',
+  created_at timestamptz not null default now()
+);
+
+create index if not exists admin_log_created_idx on admin_log (created_at desc);
+
 -- Supabase puts every public table on its web API for anyone with the publishable key.
 -- Row level security with no policies closes that door. The AfriResQ API owns these
 -- tables, so it is not affected. Add a policy only when the website must read a table directly.
@@ -193,3 +208,4 @@ alter table admin_sessions enable row level security;
 alter table partner_applications enable row level security;
 alter table auth_codes enable row level security;
 alter table auth_sessions enable row level security;
+alter table admin_log enable row level security;

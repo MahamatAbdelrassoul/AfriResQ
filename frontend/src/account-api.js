@@ -44,11 +44,13 @@ export async function savePerson(user, profileDone, safety, token) {
   return body;
 }
 
-export async function findPerson({ phone, email }) {
+export async function findPerson({ phone, email }, token) {
   const params = new URLSearchParams();
   if (phone) params.set("phone", phone);
   if (email) params.set("email", email);
-  const res = await fetch(`/api/people?${params}`);
+  const res = await fetch(`/api/people?${params}`, {
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+  });
   if (res.status === 404) return null;
   const body = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(body.error || "The profile could not be loaded.");
