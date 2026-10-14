@@ -1,3 +1,6 @@
+-- PostGIS answers map questions, such as the nearest hospital to a point.
+create extension if not exists postgis;
+
 -- One row is one person. The browser no longer has to be the only copy.
 create table if not exists people (
   id uuid primary key default gen_random_uuid(),
@@ -134,4 +137,43 @@ create table if not exists partner_applications (
   availability text not null default 'offline' check (availability in ('available', 'busy', 'unavailable', 'offline')),
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
+);
+
+-- Map points, kept in step with lat and lng. Nearest-place searches use these.
+alter table places add column if not exists location geography(Point, 4326)
+  generated always as (st_setsrid(st_makepoint(lng, lat), 4326)::geography) stored;
+create index if not exists places_location_idx on places using gist (location);
+
+alter table cases add column if not exists where_location geography(Point, 4326)
+  generated always as (
+    case when where_lat is not null and where_lng is not null
+      then st_setsrid(st_makepoint(where_lng, where_lat), 4326)::geography
+    end
+  ) stored;
+create index if not exists cases_where_location_idx on cases using gist (where_location);
+
+-- A one-time code for a phone (SMS) or a student inbox. Only the hash is stored.
+create table if not exists auth_codes (
+  id uuid primary key default gen_random_uuid(),
+  channel text not null check (channel in ('sms', 'email')),
+  destination text not null,
+  code_hash text not null,
+  purpose text not null check (purpose in ('signup', 'signin')),
+  expires_at timestamptz not null,
+  attempts integer not null default 0,
+  consumed_at timestamptz,
+  created_at timestamptz not null default now()
+);
+
+create index if not exists auth_codes_destination_idx
+  on auth_codes (destination, created_at desc);
+
+-- Proof that a phone or student email was confirmed. The browser holds the token; the database holds its hash.
+create table if not exists auth_sessions (
+  token_hash text primary key,
+  channel text not null check (channel in ('sms', 'email')),
+  destination text not null,
+  purpose text not null check (purpose in ('signup', 'signin')),
+  expires_at timestamptz not null,
+  created_at timestamptz not null default now()
 );

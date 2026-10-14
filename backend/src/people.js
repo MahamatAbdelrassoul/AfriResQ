@@ -1,4 +1,5 @@
 import { Router } from "express";
+import { authSession, isStudentEmail, sessionToken, ugandaPhone } from "./auth.js";
 
 function digits(phone) {
   return String(phone || "").replace(/\D/g, "");
@@ -11,14 +12,18 @@ function text(value) {
 function toRow(body) {
   const user = body?.user || {};
   const safety = body?.safety || {};
-  const phoneDigits = digits(user.phone);
+  const phone = ugandaPhone(user.phone);
   const personType = user.type === "student" ? "student" : user.type === "citizen" ? "citizen" : "";
   const name = text(user.name);
-  if (phoneDigits.length < 9) {
-    return { error: "Enter a Uganda phone number of at least 9 digits." };
+  const email = isStudentEmail(user.email) || text(user.email).toLowerCase();
+  if (!phone) {
+    return { error: "Enter a Uganda mobile number, for example 772 123 456." };
   }
   if (!personType) return { error: "Say whether this person is a citizen or a student." };
   if (!name) return { error: "Enter the person's name." };
+  if (personType === "student" && !isStudentEmail(email)) {
+    return { error: "Use your Makerere student email, name@students.mak.ac.ug." };
+  }
 
   const home = user.home || {};
   const kin = user.kin || {};
@@ -27,12 +32,14 @@ function toRow(body) {
   const lng = Number(home.lng);
 
   return {
+    phoneDigits: phone.national,
+    email,
     values: [
       text(user.phone),
-      phoneDigits,
+      phone.national,
       personType,
       name,
-      text(user.email).toLowerCase(),
+      email,
       text(user.uni),
       text(user.studentNo),
       text(user.hall),
@@ -56,7 +63,7 @@ function toRow(body) {
   };
 }
 
-function fromRow(row) {
+export function fromRow(row) {
   return {
     profileDone: row.profile_done,
     safety: {
@@ -107,6 +114,19 @@ export function peopleRouter(pool) {
       return;
     }
     try {
+      const session = await authSession(pool, sessionToken(req));
+      const student = parsed.values[2] === "student";
+      const matches = student
+        ? session?.channel === "email" && session.destination === parsed.email
+        : session?.channel === "sms" && session.destination === parsed.phoneDigits;
+      if (!matches) {
+        res.status(401).json({
+          error: student
+            ? "Confirm the Makerere student email before saving this profile."
+            : "Confirm the phone number by SMS before saving this profile.",
+        });
+        return;
+      }
       const saved = await pool.query(
         `insert into people (${columns})
          values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24)

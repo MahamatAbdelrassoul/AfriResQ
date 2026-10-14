@@ -142,25 +142,37 @@ body {
 
 .edge-line span { writing-mode: vertical-rl; }
 
-.map .leaflet-container {
+.map .gm-err-container,
+.map .gm-style > div > .gm-err-container {
+  display: none !important;
+}
+
+.map .gmap {
   position: absolute;
   inset: 0;
   width: 100%;
   height: 100%;
   background: #dfe8e3;
-  font-family: var(--font);
   z-index: 0;
+}
+
+.map .map-fallback {
+  position: absolute;
+  inset: 24px;
+  z-index: 1;
+  margin: 0;
+  display: flex;
+  align-items: center;
+  text-align: center;
+  color: var(--ink2);
+  font-size: 13px;
+  font-weight: 650;
 }
 
 .map .back,
 .map .tagc,
 .map .sos-pill,
 .map .turn { z-index: 500; }
-
-.leaflet-control-attribution {
-  font-size: 10px;
-  line-height: 1.3;
-}
 
 .appear { display: flex; flex-direction: column; gap: 14px; }
 .appear b { display: block; font-size: 15.5px; font-weight: 800; }
