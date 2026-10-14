@@ -10,6 +10,18 @@ body.admin {
   height: auto;
   background: var(--bg);
   color: var(--ink);
+  scrollbar-width: none;
+}
+
+body.admin::-webkit-scrollbar,
+body.admin *::-webkit-scrollbar {
+  width: 0;
+  height: 0;
+  display: none;
+}
+
+body.admin * {
+  scrollbar-width: none;
 }
 
 .team {

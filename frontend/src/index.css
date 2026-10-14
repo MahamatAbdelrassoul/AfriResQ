@@ -21,6 +21,19 @@ body {
   margin: 0 auto;
   overflow: hidden;
   background: var(--bg);
+  scrollbar-width: none;
+}
+
+.app,
+.app * {
+  scrollbar-width: none;
+}
+
+.app::-webkit-scrollbar,
+.app *::-webkit-scrollbar {
+  width: 0;
+  height: 0;
+  display: none;
 }
 
 .screen {
@@ -273,6 +286,25 @@ button.desk-entry {
     );
   }
 
+  :root[data-theme="dark"] .app[data-shell="1"] .tabbar {
+    background-image: none;
+    background-color: color-mix(in srgb, var(--green) 18%, var(--bg));
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) .app[data-shell="1"] .tabbar {
+      background-image: none;
+      background-color: color-mix(in srgb, var(--green) 18%, var(--bg));
+    }
+
+    :root:not([data-theme="light"]) .app[data-shell="0"] .partner-bar {
+      border-bottom-color: color-mix(in srgb, var(--green) 28%, transparent);
+      background: color-mix(in srgb, var(--green) 18%, var(--bg));
+      -webkit-backdrop-filter: none;
+      backdrop-filter: none;
+    }
+  }
+
   .app[data-shell="1"] .tab-brand {
     display: flex;
     align-items: center;
@@ -423,6 +455,13 @@ button.desk-entry {
     background: color-mix(in srgb, var(--green) 20%, rgb(255 255 255 / 46%));
     -webkit-backdrop-filter: blur(18px);
     backdrop-filter: blur(18px);
+  }
+
+  :root[data-theme="dark"] .app[data-shell="0"] .partner-bar {
+    border-bottom-color: color-mix(in srgb, var(--green) 28%, transparent);
+    background: color-mix(in srgb, var(--green) 18%, var(--bg));
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
   }
 
   .app[data-shell="1"] .partner-brand { display: none; }
