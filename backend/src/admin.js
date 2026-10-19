@@ -1,6 +1,7 @@
 import { randomBytes } from "node:crypto";
 import { Router } from "express";
 import { bearer, codeMatches, hashCode } from "./desks.js";
+import { ensurePartnerPlace, issuePartnerCode, partnerLocation, revokePartnerCode } from "./partners.js";
 
 const STATE_LABEL = {
   sent: "Sent",
@@ -9,15 +10,17 @@ const STATE_LABEL = {
   arrived: "Arrived",
   closed: "Closed",
   cancelled: "Cancelled",
+  declined: "Declined",
 };
 
 const STATES = new Set(Object.keys(STATE_LABEL));
 const PLACE_KINDS = new Set(["hospital", "police", "fire", "disaster"]);
 const CASE_FILTERS = {
-  open: "c.state not in ('closed', 'cancelled')",
+  open: "c.state not in ('closed', 'cancelled', 'declined')",
   waiting: "c.state = 'sent'",
   closed: "c.state = 'closed'",
   cancelled: "c.state = 'cancelled'",
+  declined: "c.state = 'declined'",
   all: "true",
 };
 const PEOPLE_FILTERS = {
@@ -66,6 +69,10 @@ async function log(pool, action, target, detail = "") {
     "insert into admin_log (action, target, detail) values ($1, $2, $3)",
     [action, String(target || ""), String(detail || "")],
   );
+}
+
+function codeDetail(issued) {
+  return issued.sentTo.length ? `sign-in code sent to ${issued.sentTo.join(", ")}` : "sign-in code could not be sent, shown to the team once";
 }
 
 // Each handler answers with its own message. Anything unexpected is a database problem.
@@ -137,7 +144,7 @@ function placeInput(body, creating) {
 
 const PLACE_SELECT = `
   select p.*,
-    count(c.id) filter (where c.state not in ('closed', 'cancelled'))::int as open_count,
+    count(c.id) filter (where c.state not in ('closed', 'cancelled', 'declined'))::int as open_count,
     count(c.id) filter (where c.state = 'closed')::int as closed_count,
     count(c.id)::int as total_count,
     exists (select 1 from desk_codes d where d.place_id = p.id) as has_code,
@@ -190,7 +197,7 @@ export function adminRouter(pool) {
   router.get("/overview", guarded(async (_req, res) => {
     const stats = await pool.query(
       `select
-         (select count(*) from cases where state not in ('closed', 'cancelled'))::int as open,
+         (select count(*) from cases where state not in ('closed', 'cancelled', 'declined'))::int as open,
          (select count(*) from cases where state = 'sent')::int as waiting,
          (select count(*) from cases where state = 'sent'
             and created_at < now() - make_interval(mins => $1))::int as late,
@@ -231,6 +238,11 @@ export function adminRouter(pool) {
         representativePhone: row.representative_phone,
         representativeEmail: row.representative_email,
         status: row.status,
+        codeSentAt: row.code_sent_at,
+        availability: row.availability,
+        placeId: row.place_id || "",
+        baseLat: row.base_lat,
+        baseLng: row.base_lng,
         createdAt: row.created_at,
       })),
     });
@@ -268,6 +280,7 @@ export function adminRouter(pool) {
       path: row.path,
       what: row.what,
       detail: row.detail,
+      declineReason: row.decline_reason || "",
       awake: row.awake,
       state: row.state,
       stateLabel: STATE_LABEL[row.state] || row.state,
@@ -316,7 +329,7 @@ export function adminRouter(pool) {
          state = coalesce(nullif($2, ''), state),
          place_id = coalesce(nullif($3, ''), place_id),
          closed_at = case
-           when coalesce(nullif($2, ''), state) in ('closed', 'cancelled') then coalesce(closed_at, now())
+           when coalesce(nullif($2, ''), state) in ('closed', 'cancelled', 'declined') then coalesce(closed_at, now())
            else null
          end,
          updated_at = now()
@@ -447,6 +460,7 @@ export function adminRouter(pool) {
       res.status(404).json({ error: "That place is not saved." });
       return;
     }
+    // A partner on this place stays connected but is paused until receiving is turned back on.
     if (!v.receives) await pool.query("delete from desk_sessions where place_id = $1", [req.params.id]);
     await log(pool, "Place changed", `${v.name} · ${req.params.id}`, v.receives ? "receives cases" : "listed only");
     res.json({ ok: true });
@@ -464,6 +478,7 @@ export function adminRouter(pool) {
     }
     await pool.query("delete from desk_sessions where place_id = $1", [req.params.id]);
     await pool.query("delete from desk_codes where place_id = $1", [req.params.id]);
+    await pool.query("update partner_applications set place_id = null where place_id = $1", [req.params.id]);
     const gone = await pool.query("delete from places where id = $1 returning name", [req.params.id]);
     if (!gone.rows[0]) {
       res.status(404).json({ error: "That place is not saved." });
@@ -479,6 +494,26 @@ export function adminRouter(pool) {
       res.status(400).json({ error: "Confirm or decline the request." });
       return;
     }
+    // A confirmed partner gets its own place at once, so it needs a map point before anything changes.
+    let location = null;
+    if (status === "approved") {
+      const current = await pool.query(
+        `select p.place_id, pl.id as existing from partner_applications p
+         left join places pl on pl.id = p.place_id where p.id = $1`,
+        [req.params.id],
+      );
+      if (!current.rows[0]) {
+        res.status(404).json({ error: "That request is not saved." });
+        return;
+      }
+      if (!current.rows[0].existing) {
+        location = await partnerLocation(pool, req.params.id, req.body || {});
+        if (!location) {
+          res.status(409).json({ needsLocation: true, error: "AfriResQ could not find this partner on the map. Enter its latitude and longitude to confirm it." });
+          return;
+        }
+      }
+    }
     const saved = await pool.query(
       `update partner_applications
        set status = $2, updated_at = now()
@@ -490,9 +525,101 @@ export function adminRouter(pool) {
       res.status(404).json({ error: "That request is not saved." });
       return;
     }
+    const { organisation } = saved.rows[0];
     const label = { approved: "Partner confirmed", declined: "Partner declined", pending: "Partner reopened" }[status];
-    await log(pool, label, saved.rows[0].organisation);
-    res.json({ ok: true, organisation: saved.rows[0].organisation, status: saved.rows[0].status });
+    if (status !== "approved") {
+      await revokePartnerCode(pool, req.params.id, status === "declined");
+      await log(pool, label, organisation, "sign-in code cancelled, place paused");
+      res.json({ ok: true, organisation, status });
+      return;
+    }
+    const place = await ensurePartnerPlace(pool, req.params.id, location);
+    const issued = await issuePartnerCode(pool, req.params.id);
+    await log(pool, label, organisation, `${place.created ? `place ${place.placeId} created` : `place ${place.placeId} receiving again`}, ${codeDetail(issued)}`);
+    res.json({ ok: true, organisation, status, placeId: place.placeId, placeCreated: place.created, located: location?.source || "", sentTo: issued.sentTo, code: issued.code });
+  }));
+
+  // A partner confirmed before places were automatic: create its place now.
+  router.post("/partners/:id/place", guarded(async (req, res) => {
+    const current = await pool.query("select status, place_id from partner_applications where id = $1", [req.params.id]);
+    if (current.rows[0]?.status !== "approved") {
+      res.status(409).json({ error: "Confirm this partner first." });
+      return;
+    }
+    const location = await partnerLocation(pool, req.params.id, req.body || {});
+    if (!location) {
+      res.status(409).json({ needsLocation: true, error: "AfriResQ could not find this partner on the map. Enter its latitude and longitude." });
+      return;
+    }
+    const place = await ensurePartnerPlace(pool, req.params.id, current.rows[0].place_id ? null : location);
+    if (!place) {
+      res.status(409).json({ needsLocation: true, error: "Enter the partner's latitude and longitude." });
+      return;
+    }
+    const name = await pool.query("select organisation from partner_applications where id = $1", [req.params.id]);
+    await log(pool, "Partner place created", name.rows[0].organisation, place.placeId);
+    res.json({ ok: true, placeId: place.placeId, located: location.source });
+  }));
+
+  // Pause stops new work without losing anything: the place stops receiving and sessions end.
+  router.patch("/partners/:id/active", guarded(async (req, res) => {
+    const active = req.body?.active === true;
+    const found = await pool.query(
+      "select organisation, place_id from partner_applications where id = $1 and status = 'approved'",
+      [req.params.id],
+    );
+    const row = found.rows[0];
+    if (!row?.place_id) {
+      res.status(409).json({ error: "This partner has no place yet." });
+      return;
+    }
+    await pool.query("update places set receives = $2 where id = $1", [row.place_id, active]);
+    if (!active) await pool.query("delete from desk_sessions where place_id = $1", [row.place_id]);
+    await log(pool, active ? "Partner resumed" : "Partner paused", row.organisation, row.place_id);
+    res.json({ ok: true, organisation: row.organisation, active });
+  }));
+
+  // Connect a confirmed partner to a place that receives cases. Its dashboard then works that place's cases.
+  router.patch("/partners/:id/place", guarded(async (req, res) => {
+    const placeId = text(req.body?.placeId, 20);
+    if (placeId) {
+      const place = await pool.query("select name, receives from places where id = $1", [placeId]);
+      if (!place.rows[0]?.receives) {
+        res.status(409).json({ error: "Choose a place that receives cases. Turn on receiving under Places first." });
+        return;
+      }
+      const taken = await pool.query(
+        "select organisation from partner_applications where place_id = $1 and id <> $2",
+        [placeId, req.params.id],
+      );
+      if (taken.rows[0]) {
+        res.status(409).json({ error: `${taken.rows[0].organisation} already works this place.` });
+        return;
+      }
+    }
+    const saved = await pool.query(
+      `update partner_applications p set place_id = $2, updated_at = now()
+       where p.id = $1 and p.status = 'approved'
+       returning organisation, (select name from places where id = $2) as place_name`,
+      [req.params.id, placeId || null],
+    );
+    if (!saved.rows[0]) {
+      res.status(409).json({ error: "Confirm this partner before connecting it to a place." });
+      return;
+    }
+    const { organisation, place_name: placeName } = saved.rows[0];
+    await log(pool, placeId ? "Partner connected" : "Partner disconnected", organisation, placeName || "");
+    res.json({ ok: true, organisation, placeName: placeName || "" });
+  }));
+
+  router.post("/partners/:id/code", guarded(async (req, res) => {
+    const issued = await issuePartnerCode(pool, req.params.id);
+    if (!issued) {
+      res.status(409).json({ error: "Confirm this partner before sending a code." });
+      return;
+    }
+    await log(pool, "Partner code sent", issued.organisation, codeDetail(issued));
+    res.json({ ok: true, organisation: issued.organisation, sentTo: issued.sentTo, code: issued.code });
   }));
 
   router.patch("/desks/:placeId", guarded(async (req, res) => {

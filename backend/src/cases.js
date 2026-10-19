@@ -2,7 +2,10 @@ import { Router } from "express";
 import { personFromRequest, ugandaPhone } from "./auth.js";
 import { deskFromRequest } from "./desks.js";
 
-const STATES = new Set(["sent", "accepted", "on_the_way", "arrived", "closed", "cancelled"]);
+const STATES = new Set(["sent", "accepted", "on_the_way", "arrived", "closed", "cancelled", "declined"]);
+const FINISHED = new Set(["closed", "cancelled", "declined"]);
+// The order a desk moves a case in. A desk cannot skip back or reopen a finished case.
+const DESK_ORDER = { sent: 0, accepted: 1, on_the_way: 2, arrived: 3, closed: 4 };
 const KINDS = new Set(["medical", "other"]);
 const PATHS = new Set(["ambulance", "route", "desk"]);
 
@@ -48,6 +51,9 @@ function fromRow(row, full) {
     whereLng: row.where_lng == null ? null : Number(row.where_lng),
     detail: row.detail || "",
     rating: row.rating,
+    declineReason: row.decline_reason || "",
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
     person: full && row.person_name
       ? {
           name: row.person_name,
@@ -92,7 +98,7 @@ export function casesRouter(pool) {
       res.status(400).json({ error: "Say what is happening." });
       return;
     }
-    if (!STATES.has(state)) {
+    if (!STATES.has(state) || state === "declined") {
       res.status(400).json({ error: "That case state is not one AfriResQ uses." });
       return;
     }
@@ -185,6 +191,28 @@ export function casesRouter(pool) {
         res.status(401).json({ error: "Sign in to see or change this case." });
         return;
       }
+      if (state === "declined") {
+        if (!ownDesk) {
+          res.status(401).json({ error: "Sign in to this desk first." });
+          return;
+        }
+        if (current.state !== "sent") {
+          res.status(409).json({ error: "Only a new request can be declined. Close it instead." });
+          return;
+        }
+        if (!text(body.reason)) {
+          res.status(400).json({ error: "Say why this request is declined. The person sees the reason." });
+          return;
+        }
+      }
+      if (ownDesk && state && state !== current.state && FINISHED.has(current.state)) {
+        res.status(409).json({ error: current.state === "declined" ? "This request was declined." : current.state === "cancelled" ? "The person cancelled this request." : "This case is closed." });
+        return;
+      }
+      if (ownDesk && !ownPhone && state in DESK_ORDER && current.state in DESK_ORDER && DESK_ORDER[state] < DESK_ORDER[current.state]) {
+        res.status(409).json({ error: "This case has already moved past that step." });
+        return;
+      }
       if (state === "accepted" || state === "on_the_way" || state === "arrived") {
         if (!ownDesk) {
           res.status(401).json({ error: "Sign in to this desk first." });
@@ -222,10 +250,11 @@ export function casesRouter(pool) {
            where_lat = case when $5::boolean then $6 else where_lat end,
            where_lng = case when $5::boolean then $7 else where_lng end,
            where_text = case when $5::boolean and $8 <> '' then $8 else where_text end,
-           closed_at = case when $2 in ('closed', 'cancelled') then coalesce(closed_at, now()) else closed_at end,
+           closed_at = case when $2 in ('closed', 'cancelled', 'declined') then coalesce(closed_at, now()) else closed_at end,
+           decline_reason = case when $2 = 'declined' then $9 else decline_reason end,
            updated_at = now()
          where public_id = $1`,
-        [req.params.id, state, body.rating != null && body.rating !== "", rating, hasPoint, hasPoint ? lat : null, hasPoint ? lng : null, text(body.whereText)],
+        [req.params.id, state, body.rating != null && body.rating !== "", rating, hasPoint, hasPoint ? lat : null, hasPoint ? lng : null, text(body.whereText), text(body.reason).slice(0, 240)],
       );
       if (!saved.rowCount) {
         res.status(404).json({ error: "No case is saved with that number." });
@@ -285,8 +314,9 @@ export function casesRouter(pool) {
         ? await pool.query(
             `${CASE_SELECT}
              where c.place_id = $1
-               and c.state ${closed ? "= 'closed'" : "not in ('closed', 'cancelled')"}
-             order by c.created_at ${closed ? "desc" : "asc"}`,
+               and c.state ${closed ? "in ('closed', 'cancelled', 'declined')" : "not in ('closed', 'cancelled', 'declined')"}
+             order by c.created_at ${closed ? "desc" : "asc"}
+             ${closed ? "limit 100" : ""}`,
             [placeId],
           )
         : await pool.query(

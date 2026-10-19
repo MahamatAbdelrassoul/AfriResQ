@@ -32,6 +32,11 @@ const pool = new pg.Pool({
     ? { ca: readFileSync(caPath, "utf8"), rejectUnauthorized: true }
     : { rejectUnauthorized: false },
 });
+// A dropped network or a database restart breaks idle connections. The pool drops them and
+// opens new ones on the next request, so the API keeps running instead of crashing.
+pool.on("error", (err) => {
+  console.error("A database connection was lost:", err.message);
+});
 
 app.use(cors());
 app.use(express.json());

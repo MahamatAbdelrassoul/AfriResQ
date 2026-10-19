@@ -38,3 +38,11 @@ export async function closeDesk(token) {
     headers: { Authorization: `Bearer ${token}` },
   }).catch(() => {});
 }
+
+export async function deskMe(token) {
+  const res = await fetch("/api/desk/me", { headers: { Authorization: `Bearer ${token}` } });
+  const body = await res.json().catch(() => ({}));
+  if (res.status === 401) throw Object.assign(new Error(body.error || "Sign in to this desk first."), { signedOut: true });
+  if (!res.ok) throw new Error(body.error || "The desk could not be reached.");
+  return body;
+}

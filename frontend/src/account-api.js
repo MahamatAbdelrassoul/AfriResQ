@@ -30,14 +30,25 @@ export async function verifyOtp(payload) {
   return body;
 }
 
-export async function savePerson(user, profileDone, safety, token) {
+export async function loginWithPassword(payload) {
+  const res = await fetch("/api/auth/login", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  const body = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(body.error || "Sign-in did not work.");
+  return body;
+}
+
+export async function savePerson(user, profileDone, safety, token, password) {
   const res = await fetch("/api/people", {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
       ...(token ? { Authorization: `Bearer ${token}` } : {}),
     },
-    body: JSON.stringify({ user, profileDone, safety }),
+    body: JSON.stringify({ user, profileDone, safety, ...(password ? { password } : {}) }),
   });
   const body = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(body.error || "The profile could not be saved.");

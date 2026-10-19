@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { findPerson, isStudentEmail, requestOtp, savePerson, studentHost, verifyOtp } from "./account-api.js";
+import { findPerson, isStudentEmail, loginWithPassword, requestOtp, savePerson, studentHost, verifyOtp } from "./account-api.js";
 import { AppState } from "./app-state.js";
-import { createCase, getCase, updateCase } from "./case-api.js";
+import { createCase, getCase, listMyCases, updateCase } from "./case-api.js";
 import { readFix } from "./locate.js";
 import { PLACES } from "./map.js";
 import { listPlaces } from "./places-api.js";
@@ -31,7 +31,24 @@ function loadAccount() {
   }
 }
 
-const OPEN_SCREENS = new Set(["welcome", "signin", "welcomeBack", "partnerGate", "home", "places", "safetyHome", "account"]);
+// The phone or email last used to sign in on this device, so the sign-in form opens filled in.
+function loadLogin() {
+  try {
+    const raw = localStorage.getItem("afriresq-login");
+    return raw ? JSON.parse(raw) : null;
+  } catch {
+    return null;
+  }
+}
+
+function rememberLogin(user) {
+  const tab = user.type === "student" ? "email" : "phone";
+  try {
+    localStorage.setItem("afriresq-login", JSON.stringify({ tab, phone: user.phone || "", email: user.email || "" }));
+  } catch { /* the form starts empty next time */ }
+}
+
+const OPEN_SCREENS = new Set(["welcome", "signin", "welcomeBack", "partnerGate", "partnerLogin", "partnerHome", "home", "places", "safetyHome", "account"]);
 
 function screenFromAddress(profileDone) {
   const name = window.location.hash.replace(/^#\//, "").split(/[/?#]/)[0];
@@ -42,8 +59,11 @@ function screenFromAddress(profileDone) {
 
 export default function App() {
   const saved = useMemo(() => loadAccount(), []);
+  const lastLogin = useMemo(() => loadLogin(), []);
   const opened = screenFromAddress(Boolean(saved?.profileDone));
-  const [user, setUser] = useState(saved?.user || studentSeed);
+  const [user, setUser] = useState(saved?.user || (lastLogin
+    ? { ...studentSeed, phone: lastLogin.phone, email: lastLogin.email }
+    : studentSeed));
   const [profileDone, setProfileDone] = useState(Boolean(saved?.profileDone));
   const [screen, setScreen] = useState(opened || (saved?.profileDone ? "welcomeBack" : "welcome"));
   const [stack, setStack] = useState([opened || (saved?.profileDone ? "welcomeBack" : "welcome")]);
@@ -53,7 +73,8 @@ export default function App() {
   const [uniDomain, setUniDomain] = useState("mak.ac.ug");
   const [uniQuery, setUniQuery] = useState("");
   const [codeFor, setCodeFor] = useState("");
-  const [signinTab, setSigninTab] = useState("phone");
+  const [signinTab, setSigninTab] = useState(lastLogin?.tab || "phone");
+  const [newPassword, setNewPassword] = useState({ value: "", again: "" });
   const [safety, setSafety] = useState(saved?.safety || { mode: "always", kin: true, pings: 3 });
   const [report, setReport] = useState({
     what: "Injury or fall",
@@ -128,6 +149,28 @@ export default function App() {
       ignore = true;
     };
   }, [saved]);
+
+  // After a reload, bring back the request the person is still waiting on, or one declined in the last hours,
+  // so its status stays on the home screen.
+  useEffect(() => {
+    if (!profileDone || !authToken || !user.phone || caseRef.current) return undefined;
+    let ignore = false;
+    listMyCases(user.phone, authToken)
+      .then((rows) => {
+        if (ignore || caseRef.current) return;
+        const recent = (row) => Date.now() - new Date(row.updatedAt || row.createdAt).getTime() < 6 * 3600 * 1000;
+        const live = rows.find((row) => ["sent", "accepted", "on_the_way", "arrived"].includes(row.state) || (row.state === "declined" && recent(row)));
+        if (!live) return;
+        caseRef.current = live;
+        setKase(live);
+        if (live.place) setPlace(live.place);
+        if (live.kind === "other" && live.otherType) setOtherType(live.otherType);
+      })
+      .catch(() => {});
+    return () => {
+      ignore = true;
+    };
+  }, [profileDone, authToken]);
 
   useEffect(() => {
     if (!toast) return undefined;
@@ -316,6 +359,8 @@ export default function App() {
     codeFor,
     signinTab,
     setSigninTab,
+    newPassword,
+    setNewPassword,
     safety,
     setSafety,
     report,
@@ -426,6 +471,47 @@ export default function App() {
       const ok = await issueCode({ channel: phone ? "sms" : "email", purpose: "signin" });
       if (ok) go("code");
     },
+    async signinWithPassword(password) {
+      const phone = signinTab === "phone";
+      const digits = (user.phone || "").replace(/\D/g, "");
+      const email = (user.email || "").trim();
+      if (phone ? !/^7\d{8}$/.test(digits) : !email.includes("@")) {
+        setError(phone ? "Enter your 9-digit Uganda number." : "Enter the email on your account.");
+        return;
+      }
+      if (!password) {
+        setError("Enter your password.");
+        return;
+      }
+      setSending(true);
+      setError("");
+      try {
+        const result = await loginWithPassword(phone ? { phone: digits, password } : { email, password });
+        rememberToken(result.token);
+        setUser(result.account.user);
+        setProfileDone(true);
+        setSafety(result.account.safety);
+        persist(result.account.user, true, result.account.safety);
+        rememberLogin(result.account.user);
+        showToast("Signed in. Welcome back.");
+        go("home", null, true);
+      } catch (err) {
+        setError(err.message || "Sign-in did not work.");
+      } finally {
+        setSending(false);
+      }
+    },
+    async changePassword(value) {
+      try {
+        const saved = await savePerson(user, profileDone, safety, authToken, value);
+        setUser(saved.user);
+        persist(saved.user, profileDone, safety);
+        return true;
+      } catch (err) {
+        showToast(err.message || "The password could not be saved.");
+        return false;
+      }
+    },
     async resendCode() {
       const channel = flow === "signin"
         ? (signinTab === "phone" ? "sms" : "email")
@@ -459,7 +545,8 @@ export default function App() {
           setProfileDone(true);
           setSafety(result.account.safety);
           persist(result.account.user, true, result.account.safety);
-          showToast("Signed in. Welcome back.");
+          rememberLogin(result.account.user);
+          showToast(result.account.user.hasPassword ? "Signed in. Welcome back." : "Signed in. Add a password under Account to skip the code next time.");
           go("home", null, true);
           return;
         }
@@ -473,13 +560,17 @@ export default function App() {
     },
     async finishSetup() {
       try {
-        await savePerson(user, true, safety, authToken);
+        const saved = await savePerson(user, true, safety, authToken, newPassword.value);
+        setUser(saved.user);
+        setNewPassword({ value: "", again: "" });
+        setProfileDone(true);
+        persist(saved.user, true, safety);
+        rememberLogin(saved.user);
       } catch (err) {
         setError(err.message || "The profile could not be saved.");
+        showToast(err.message || "The profile could not be saved.");
         return;
       }
-      setProfileDone(true);
-      persist(user, true, safety);
       showToast(safety.mode === "off" ? "Welcome to AfriResQ" : "Safety Net is on. Welcome to AfriResQ");
       go("home", null, true);
     },
@@ -576,7 +667,7 @@ export default function App() {
 
   return (
     <AppState.Provider value={value}>
-      <div className="app" data-tabs={["home", "places", "safetyHome", "account"].includes(screen) ? "1" : "0"} data-shell={["welcome", "who", "phone", "universities", "email", "code", "profile1", "profile2", "profile3", "safety", "signin", "welcomeBack", "partnerJoin", "partnerGate", "partnerSignin", "partnerQueue", "partnerCase"].includes(screen) ? "0" : "1"} data-lightstatus={["welcome", "welcomeBack"].includes(screen) ? "1" : "0"}>
+      <div className="app" data-tabs={["home", "places", "safetyHome", "account"].includes(screen) ? "1" : "0"} data-shell={["welcome", "who", "phone", "universities", "email", "code", "profile1", "profile2", "profile3", "safety", "signin", "welcomeBack", "partnerJoin", "partnerGate", "partnerSignin", "partnerQueue", "partnerCase", "partnerLogin", "partnerHome"].includes(screen) ? "0" : "1"} data-lightstatus={["welcome", "welcomeBack"].includes(screen) ? "1" : "0"}>
         <Sprite />
         <CurrentScreen />
         <TabBar />

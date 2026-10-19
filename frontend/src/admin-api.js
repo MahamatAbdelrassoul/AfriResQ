@@ -23,7 +23,7 @@ export async function teamCall(token, path, { method = "GET", body } = {}) {
   });
   const data = await res.json().catch(() => ({}));
   if (res.status === 401 && token) throw new SignedOut(data.error || "Sign in with the team code first.");
-  if (!res.ok) throw new Error(data.error || "The team page could not reach AfriResQ.");
+  if (!res.ok) throw Object.assign(new Error(data.error || "The team page could not reach AfriResQ."), { data });
   return data;
 }
 
@@ -40,6 +40,7 @@ export function ago(value) {
 
 export function stateClass(state) {
   if (state === "sent") return "warn";
+  if (state === "declined") return "warn";
   if (state === "closed" || state === "cancelled") return "";
   return "ok";
 }
@@ -51,6 +52,7 @@ export const STATE_OPTIONS = [
   ["arrived", "Arrived"],
   ["closed", "Closed"],
   ["cancelled", "Cancelled"],
+  ["declined", "Declined"],
 ];
 
 export const KIND_LABEL = {

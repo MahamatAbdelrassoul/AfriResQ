@@ -61,7 +61,7 @@ create table if not exists cases (
   path text not null check (path in ('ambulance', 'route', 'desk')),
   other_type text not null default '',
   detail text not null default '',
-  state text not null check (state in ('sent', 'accepted', 'on_the_way', 'arrived', 'closed', 'cancelled')),
+  state text not null check (state in ('sent', 'accepted', 'on_the_way', 'arrived', 'closed', 'cancelled', 'declined')),
   rating integer check (rating is null or (rating between 1 and 5)),
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
@@ -184,6 +184,48 @@ create table if not exists auth_sessions (
 alter table people add column if not exists blocked boolean not null default false;
 alter table people add column if not exists blocked_reason text not null default '';
 
+-- A password set at sign-up, so a member can sign in again without a code. Only the hash is stored.
+alter table people add column if not exists password_hash text not null default '';
+alter table people add column if not exists failed_logins integer not null default 0;
+alter table people add column if not exists locked_until timestamptz;
+
+-- A confirmed partner signs in with its official email and the code sent when the team confirmed it.
+-- Only the hash is stored. Declining or reopening the request clears it.
+alter table partner_applications add column if not exists access_code_hash text not null default '';
+alter table partner_applications add column if not exists code_sent_at timestamptz;
+alter table partner_applications add column if not exists failed_logins integer not null default 0;
+alter table partner_applications add column if not exists locked_until timestamptz;
+
+-- A desk or partner may decline a request it cannot take. The person sees why and can choose another place.
+do $$
+begin
+  if exists (
+    select 1 from pg_constraint
+    where conname = 'cases_state_check' and pg_get_constraintdef(oid) not like '%declined%'
+  ) then
+    alter table cases drop constraint cases_state_check;
+    alter table cases add constraint cases_state_check
+      check (state in ('sent', 'accepted', 'on_the_way', 'arrived', 'closed', 'cancelled', 'declined'));
+  end if;
+end $$;
+alter table cases add column if not exists decline_reason text not null default '';
+
+-- Where the partner is based, given on the join form. Confirming the partner puts its place there.
+alter table partner_applications add column if not exists base_lat double precision;
+alter table partner_applications add column if not exists base_lng double precision;
+
+-- A confirmed partner works as the desk of one place: it sees and moves that place's cases.
+alter table partner_applications add column if not exists place_id text references places (id);
+create unique index if not exists partner_applications_place_unique
+  on partner_applications (place_id)
+  where place_id is not null;
+
+create table if not exists partner_sessions (
+  token_hash text primary key,
+  partner_id uuid not null references partner_applications (id) on delete cascade,
+  expires_at timestamptz not null
+);
+
 -- Every change made from the team page, newest first. It is never edited.
 create table if not exists admin_log (
   id bigint generated always as identity primary key,
@@ -209,3 +251,4 @@ alter table partner_applications enable row level security;
 alter table auth_codes enable row level security;
 alter table auth_sessions enable row level security;
 alter table admin_log enable row level security;
+alter table partner_sessions enable row level security;

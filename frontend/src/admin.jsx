@@ -211,7 +211,7 @@ export default function Team() {
           {tab === "cases" ? <CasesPanel key={caseFilter} {...panelProps} places={overview.places} initialFilter={caseFilter} /> : null}
           {tab === "people" ? <PeoplePanel {...panelProps} /> : null}
           {tab === "places" ? <PlacesPanel {...panelProps} places={overview.places} /> : null}
-          {tab === "partners" ? <PartnersPanel {...panelProps} applications={overview.applications} /> : null}
+          {tab === "partners" ? <PartnersPanel {...panelProps} applications={overview.applications} places={overview.places} /> : null}
           {tab === "security" ? <SecurityPanel {...panelProps} /> : null}
         </main>
       ) : (

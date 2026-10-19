@@ -9,6 +9,9 @@ const SESSION_TTL = "30 days";
 const COOLDOWN_SECONDS = 45;
 const HOURLY_LIMIT = 5;
 const MAX_ATTEMPTS = 5;
+const MAX_PASSWORD_TRIES = 5;
+const LOCK_TIME = "15 minutes";
+export const PASSWORD_MIN = 8;
 
 function studentDomain() {
   return String(process.env.STUDENT_EMAIL_DOMAIN || "students.mak.ac.ug").trim().toLowerCase();
@@ -37,6 +40,16 @@ async function destinationAccount(pool, channel, destination) {
     ? await pool.query("select profile_done from people where phone_digits = $1", [destination])
     : await pool.query("select profile_done from people where lower(email) = $1", [destination]);
   return found.rows[0] || null;
+}
+
+async function openSession(pool, channel, destination, purpose) {
+  const token = randomBytes(32).toString("hex");
+  await pool.query(
+    `insert into auth_sessions (token_hash, channel, destination, purpose, expires_at)
+     values ($1, $2, $3, $4, now() + interval '${SESSION_TTL}')`,
+    [tokenHash(token), channel, destination, purpose],
+  );
+  return token;
 }
 
 export async function authSession(pool, token) {
@@ -183,12 +196,7 @@ export function authRouter(pool) {
       }
 
       await pool.query("update auth_codes set consumed_at = now() where id = $1", [row.id]);
-      const token = randomBytes(32).toString("hex");
-      await pool.query(
-        `insert into auth_sessions (token_hash, channel, destination, purpose, expires_at)
-         values ($1, $2, $3, $4, now() + interval '${SESSION_TTL}')`,
-        [tokenHash(token), channel, destination, row.purpose],
-      );
+      const token = await openSession(pool, channel, destination, row.purpose);
 
       let account = null;
       if (row.purpose === "signin") {
@@ -204,6 +212,62 @@ export function authRouter(pool) {
       res.json({ verified: true, token, account });
     } catch {
       res.status(503).json({ error: "The code could not be checked." });
+    }
+  });
+
+  // Phone or email plus the password chosen at sign-up. Citizens and students both use it.
+  router.post("/login", async (req, res) => {
+    const password = String(req.body?.password || "");
+    const email = String(req.body?.email || "").trim().toLowerCase();
+    const phone = ugandaPhone(req.body?.phone);
+    if (!password || (!email && !phone)) {
+      res.status(400).json({ error: "Enter your phone number or email, and your password." });
+      return;
+    }
+
+    try {
+      const found = email
+        ? await pool.query("select * from people where lower(email) = $1 and email <> ''", [email])
+        : await pool.query("select * from people where phone_digits = $1", [phone.national]);
+      const person = found.rows[0];
+      const wrong = email ? "That email or password is not right." : "That phone number or password is not right.";
+      if (!person?.profile_done) {
+        res.status(401).json({ error: wrong });
+        return;
+      }
+      if (person.locked_until && new Date(person.locked_until) > new Date()) {
+        res.status(429).json({ error: "Too many wrong passwords. Wait 15 minutes, or sign in with a code." });
+        return;
+      }
+      if (!person.password_hash) {
+        res.status(409).json({ error: "This account has no password yet. Sign in with a code, then add one under Account." });
+        return;
+      }
+      if (!codeMatches(password, person.password_hash)) {
+        await pool.query(
+          `update people set
+             failed_logins = case when failed_logins + 1 >= $2 then 0 else failed_logins + 1 end,
+             locked_until = case when failed_logins + 1 >= $2 then now() + interval '${LOCK_TIME}' else locked_until end
+           where id = $1`,
+          [person.id, MAX_PASSWORD_TRIES],
+        );
+        res.status(401).json({ error: wrong });
+        return;
+      }
+
+      await pool.query("update people set failed_logins = 0, locked_until = null where id = $1", [person.id]);
+      // The same proof a code gives: students by their university email, citizens by phone.
+      const student = person.person_type === "student";
+      const token = await openSession(
+        pool,
+        student ? "email" : "sms",
+        student ? person.email.toLowerCase() : person.phone_digits,
+        "signin",
+      );
+      const { fromRow } = await import("./people.js");
+      res.json({ token, account: fromRow(person) });
+    } catch {
+      res.status(503).json({ error: "Sign-in is not available right now." });
     }
   });
 

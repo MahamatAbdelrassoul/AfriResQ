@@ -1,5 +1,6 @@
 import { Router } from "express";
-import { authSession, isStudentEmail, personFromRequest, sessionToken, ugandaPhone } from "./auth.js";
+import { authSession, isStudentEmail, PASSWORD_MIN, personFromRequest, sessionToken, ugandaPhone } from "./auth.js";
+import { hashCode } from "./desks.js";
 
 function digits(phone) {
   return String(phone || "").replace(/\D/g, "");
@@ -24,6 +25,12 @@ function toRow(body) {
   if (personType === "student" && !isStudentEmail(email)) {
     return { error: "Use your Makerere student email, name@students.mak.ac.ug." };
   }
+  // Optional on every save. An empty password keeps the one already stored.
+  const password = typeof body?.password === "string" ? body.password : "";
+  if (password && password.length < PASSWORD_MIN) {
+    return { error: `Use a password of at least ${PASSWORD_MIN} characters.` };
+  }
+  if (password.length > 128) return { error: "Use a password of 128 characters or fewer." };
 
   const home = user.home || {};
   const kin = user.kin || {};
@@ -59,6 +66,7 @@ function toRow(body) {
       text(safety.mode) || "always",
       safety.kin !== false,
       Number.isFinite(Number(safety.pings)) ? Number(safety.pings) : 3,
+      password ? hashCode(password) : "",
     ],
   };
 }
@@ -80,6 +88,7 @@ export function fromRow(row) {
       studentNo: row.student_no,
       hall: row.hall,
       lang: row.language,
+      hasPassword: Boolean(row.password_hash),
       kin: { name: row.kin_name, rel: row.kin_relation, phone: row.kin_phone },
       home: {
         text: row.home_text,
@@ -101,7 +110,7 @@ const columns = `
   phone, phone_digits, person_type, name, email, university, student_no, hall, language,
   kin_name, kin_relation, kin_phone, home_text, home_lat, home_lng,
   blood, allergies, conditions, medications, share_medical,
-  profile_done, safety_mode, safety_kin, safety_pings
+  profile_done, safety_mode, safety_kin, safety_pings, password_hash
 `;
 
 export function peopleRouter(pool) {
@@ -127,9 +136,17 @@ export function peopleRouter(pool) {
         });
         return;
       }
+      if (student) {
+        // A student types the phone number; it is not confirmed. It must not take over someone else's row.
+        const owner = await pool.query("select email from people where phone_digits = $1", [parsed.phoneDigits]);
+        if (owner.rows[0] && owner.rows[0].email.toLowerCase() !== parsed.email) {
+          res.status(409).json({ error: "That phone number already belongs to another account." });
+          return;
+        }
+      }
       const saved = await pool.query(
         `insert into people (${columns})
-         values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24)
+         values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25)
          on conflict (phone_digits) do update set
            phone = excluded.phone,
            person_type = excluded.person_type,
@@ -154,6 +171,7 @@ export function peopleRouter(pool) {
            safety_mode = excluded.safety_mode,
            safety_kin = excluded.safety_kin,
            safety_pings = excluded.safety_pings,
+           password_hash = case when excluded.password_hash <> '' then excluded.password_hash else people.password_hash end,
            updated_at = now()
          returning *`,
         parsed.values,

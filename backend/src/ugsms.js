@@ -1,6 +1,10 @@
 const SEND_URL = "https://www.ugsms.com/api/v2/sms/send";
 
 export async function sendSmsCode(localNumber, code) {
+  return sendSms(localNumber, `AfriResQ code: ${code}. It expires in 10 minutes.`);
+}
+
+export async function sendSms(localNumber, message) {
   const apiKey = String(process.env.UGSMS_API_KEY || "").trim();
   if (!apiKey) {
     const err = new Error("SMS is not set up. Add UGSMS_API_KEY to backend/.env.");
@@ -18,7 +22,7 @@ export async function sendSmsCode(localNumber, code) {
     },
     body: JSON.stringify({
       numbers: localNumber,
-      message_body: `AfriResQ code: ${code}. It expires in 10 minutes.`,
+      message_body: message,
       sender_id: process.env.UGSMS_SENDER_ID || "AfriResQ",
       transaction_id: transactionId,
     }),

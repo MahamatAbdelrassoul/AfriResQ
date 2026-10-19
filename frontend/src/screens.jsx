@@ -1,8 +1,8 @@
 import { useEffect, useRef, useState } from "react";
 import { useApp } from "./app-state.js";
-import { pinFrom, watchFix } from "./locate.js";
+import { pinFrom, readFix, watchFix } from "./locate.js";
 import { HOME, ROUTES, STEPS, TRAIL, YOU, pointAlong } from "./map.js";
-import { PartnerCase, PartnerGate, PartnerQueue, PartnerSignIn } from "./partner.jsx";
+import { PartnerCase, PartnerGate, PartnerHome, PartnerLogin, PartnerQueue, PartnerSignIn } from "./partner.jsx";
 import { PARTNER_CATEGORIES } from "./partner-categories.js";
 import { Btn, Field, Hdr, Icon, Inp, MapBoard, Note, Screen, Steps } from "./ui.jsx";
 import accidentArt from "./assets/scenes/scene-accident.png";
@@ -44,6 +44,7 @@ const DESKS = {
   other: ["General desk", 0],
 };
 const WHAT = ["Not breathing", "Unconscious", "Severe bleeding", "Injury or fall", "Chest pain", "Pregnancy", "Seizure", "Other medical"];
+const PASSWORD_MIN = 8;
 const LANGS = ["English", "Luganda", "Runyankole", "Kiswahili"];
 const BLOOD = ["O+", "O-", "A+", "A-", "B+", "B-", "AB+", "AB-", "Not sure"];
 const RELS = ["Mother", "Father", "Sibling", "Guardian", "Friend"];
@@ -65,7 +66,7 @@ const SCENES = {
   profile2: ["People\nand a home", profileArt, [["users", "Next of kin", "Called if you cannot answer"], ["home", "Home pin", "Used when GPS fails"], ["shield", "On your profile", "Until you change it"]]],
   profile3: ["Only in\nan open case", profileArt, [["drop", "Medical card", "Optional"], ["lock", "Sharing stops", "When the case closes"], ["shield", "You choose", "Turn it off any time"]]],
   safety: ["If you go\nmissing", safetyArt, [["radio", "Last location", "Quietly saved"], ["clock", "We ask you first", "And wait 30 minutes"], ["users", "People you trust", "Only if you do not answer"]]],
-  signin: ["Welcome\nback", joinArt, [["phone", "Phone", "A code by SMS"], ["mail", "University email", "A code to your inbox"], ["lock", "No password", "The same account"]]],
+  signin: ["Welcome\nback", joinArt, [["phone", "Phone", "Citizens and students"], ["mail", "University email", "Students"], ["lock", "Your password", "Or a one-time code"]]],
 };
 
 function PageArt({ title, sub, sos = false, kind, line, points }) {
@@ -136,6 +137,9 @@ function Welcome() {
           <Btn tone="ghost" onClick={() => go("signin")}>I already have an account</Btn>
           <button type="button" className="w-foot desk-entry" onClick={() => go("partnerJoin")}>
             <Icon n="plus" c="s" />Join as a partner
+          </button>
+          <button type="button" className="w-foot desk-entry" onClick={() => go("partnerLogin")}>
+            <Icon n="check" c="s" />Partner sign-in
           </button>
           <button type="button" className="w-foot desk-entry" onClick={() => go("partnerGate")}>
             <Icon n="shield2" c="s" />I work at a Makerere desk
@@ -252,9 +256,27 @@ function PartnerJoin() {
     representativeName: "",
     representativePhone: "",
     representativeEmail: "",
+    baseLat: "",
+    baseLng: "",
   });
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
+  const [locating, setLocating] = useState(false);
+  const [locateNote, setLocateNote] = useState("");
+
+  async function useHere() {
+    setLocating(true);
+    setLocateNote("");
+    try {
+      const fix = await readFix();
+      setForm((current) => ({ ...current, baseLat: fix.lat.toFixed(6), baseLng: fix.lng.toFixed(6) }));
+      setLocateNote(`Location found, within about ${fix.accuracy} m. Only use it if you are at the base now.`);
+    } catch {
+      setLocateNote("The browser did not share a location. Type the latitude and longitude instead.");
+    } finally {
+      setLocating(false);
+    }
+  }
   const set = (key) => (value) => setForm((current) => ({ ...current, [key]: value }));
 
   useEffect(() => {
@@ -316,6 +338,8 @@ function PartnerJoin() {
         <div className="body partner-join">
           <Hdr title="Pending verification" sub={form.organisation} sos={false} />
           <Note icon="lock">AfriResQ has the request. This organisation will not receive a case until the team confirms it. Call 999 or 112 if someone needs help now.</Note>
+          <Note icon="pin">Once confirmed, your organisation gets its own place on the AfriResQ map and receives cases there.</Note>
+          <Note icon="mail">Once confirmed, a sign-in code goes to {form.email || "the official email"} and by SMS to {form.representativeName || "the representative"}. Use it under Partner sign-in on the welcome screen.</Note>
         </div>
       </Screen>
     );
@@ -340,6 +364,14 @@ function PartnerJoin() {
             <Field label="Physical address">
               <Inp icon="pin" value={form.address} placeholder="Street and town" onChange={set("address")} />
             </Field>
+            <Field label="Where the base is on the map">
+              <div style={{ display: "flex", gap: 8 }}>
+                <Inp icon="pin" mode="decimal" value={form.baseLat} placeholder="Latitude, 0.3304" onChange={set("baseLat")} />
+                <Inp mode="decimal" value={form.baseLng} placeholder="Longitude, 32.5701" onChange={set("baseLng")} />
+              </div>
+            </Field>
+            <button type="button" className="link left" disabled={locating} onClick={useHere}>{locating ? "Finding the location…" : "Use this device's location"}</button>
+            <Note icon="pin">{locateNote || "Once confirmed, your organisation appears here on the AfriResQ map and receives cases. In Google Maps, right-click your base and click the numbers to copy them."}</Note>
             <Field label="Operating districts">
               <Inp value={form.districts} placeholder="Kampala, Wakiso" onChange={set("districts")} />
             </Field>
@@ -556,7 +588,7 @@ function Code() {
 }
 
 function Profile1() {
-  const { user, student, setPath, setUser, go, showToast } = useApp();
+  const { user, student, setPath, setUser, go, showToast, newPassword, setNewPassword } = useApp();
   return (
     <Screen>
       <div className="body">
@@ -586,12 +618,24 @@ function Profile1() {
             ))}
           </div>
         </Field>
+        <Field label="Password">
+          <Inp icon="lock" type="password" autoComplete="new-password" value={newPassword.value} placeholder={`At least ${PASSWORD_MIN} characters`} onChange={(value) => setNewPassword({ ...newPassword, value })} />
+        </Field>
+        <Field label="Password again">
+          <Inp icon="lock" type="password" autoComplete="new-password" value={newPassword.again} placeholder="Type it once more" onChange={(value) => setNewPassword({ ...newPassword, again: value })} />
+        </Field>
+        <Note icon="lock">{student ? "Sign in next time with your student email or phone and this password." : "Sign in next time with your phone number and this password."}</Note>
         </div>
       </div>
       <div className="foot">
         <Btn onClick={() => {
           if (!(user.name || "").trim()) {
             showToast("Please enter your full name.");
+            return;
+          }
+          const problem = passwordProblem(newPassword.value, newPassword.again);
+          if (problem) {
+            showToast(problem);
             return;
           }
           go("profile2");
@@ -721,7 +765,8 @@ function Consent() {
 }
 
 function SignIn() {
-  const { signinTab, setSigninTab, user, setPath, error, sendSignin, go, sending } = useApp();
+  const { signinTab, setSigninTab, user, setPath, error, sendSignin, signinWithPassword, go, sending } = useApp();
+  const [password, setPassword] = useState("");
   return (
     <Screen>
       <div className="body">
@@ -732,19 +777,23 @@ function SignIn() {
           <button type="button" className={signinTab === "email" ? "on" : ""} onClick={() => setSigninTab("email")}>University email</button>
         </div>
         {signinTab === "phone" ? (
-          <Field label="Uganda phone number" error={error}>
-            <Inp icon="phone" pre="+256" mode="tel" value={user.phone} placeholder="7XX XXX XXX" onChange={(value) => setPath("user.phone", value)} />
+          <Field label="Uganda phone number">
+            <Inp icon="phone" pre="+256" mode="tel" name="username" autoComplete="username" value={user.phone} placeholder="7XX XXX XXX" onChange={(value) => setPath("user.phone", value)} />
           </Field>
         ) : (
-          <Field label="University email" error={error}>
-            <Inp icon="mail" type="email" value={user.email} placeholder="name@students.mak.ac.ug" onChange={(value) => setPath("user.email", value)} />
+          <Field label="University email">
+            <Inp icon="mail" type="email" name="username" autoComplete="username" value={user.email} placeholder="name@students.mak.ac.ug" onChange={(value) => setPath("user.email", value)} />
           </Field>
         )}
-        <Note>{signinTab === "phone" ? "Citizens get a 6-digit code by SMS." : "Makerere students use name@students.mak.ac.ug. The code arrives by email."}</Note>
+        <Field label="Password" error={error}>
+          <Inp icon="lock" type="password" name="password" autoComplete="current-password" value={password} placeholder="Your password" onChange={setPassword} />
+        </Field>
+        <Note>Forgot it, or never set one? Use a code instead. {signinTab === "phone" ? "It arrives by SMS." : "It arrives in your student inbox."}</Note>
         </div>
       </div>
       <div className="foot">
-        <Btn disabled={sending} onClick={sendSignin}>{sending ? "Sending..." : "Send code"}</Btn>
+        <Btn disabled={sending} onClick={() => signinWithPassword(password)}>{sending ? "Signing in..." : "Sign in"}</Btn>
+        <button type="button" className="link" disabled={sending} onClick={sendSignin}>Send me a code instead</button>
         <button type="button" className="link" onClick={() => go("who")}>New here? Create an account</button>
       </div>
     </Screen>
@@ -771,7 +820,7 @@ function WelcomeBack() {
           </p>
           <div className="spacer" />
           <Btn tone="white" onClick={() => go("home", null, true)}><Icon n="finger" />Unlock with fingerprint</Btn>
-          <Btn tone="ghost" onClick={() => go("signin")}>Use a code instead</Btn>
+          <Btn tone="ghost" onClick={() => go("signin")}>Sign in with password or code</Btn>
           <button type="button" className="link" style={{ color: "#fff", opacity: 0.85 }} onClick={signOut}>Not {firstName(user.name)}? Use another account</button>
           <button type="button" className="w-foot" style={{ color: "#fff", justifyContent: "center", display: "flex", gap: 6, alignItems: "center", fontWeight: 700, fontSize: 13, margin: "0 auto" }} onClick={() => openSheet("lines")}>
             <Icon n="phone" c="s" />Call 999 or 112
@@ -779,6 +828,66 @@ function WelcomeBack() {
         </div>
       </div>
     </Screen>
+  );
+}
+
+// What the person sees about a request they sent, in their own words.
+const REQUEST_STATUS = {
+  sent: ["Waiting for a reply", "Sent. The team is being alerted.", "warn"],
+  accepted: ["Accepted", "A team has taken your request.", "ok"],
+  on_the_way: ["On the way", "Help is moving to you.", "ok"],
+  arrived: ["Arrived", "Help is with you.", "ok"],
+  declined: ["Declined", "They could not take it. Choose other help.", "bad"],
+};
+
+function RequestStatusCard() {
+  const { kase, places, go, setPlace, refreshCase, clearCase } = useApp();
+  const refreshRef = useRef(refreshCase);
+  refreshRef.current = refreshCase;
+  const status = kase ? REQUEST_STATUS[kase.state] : null;
+  useEffect(() => {
+    if (!kase?.id || !status || kase.state === "declined") return undefined;
+    const id = setInterval(() => refreshRef.current(), 5000);
+    return () => clearInterval(id);
+  }, [kase?.id, kase?.state]);
+  if (!status) return null;
+  const where = places[kase.place]?.name || kase.desk || "the desk";
+  const open = () => {
+    if (kase.place) setPlace(kase.place);
+    go(kase.kind === "other" ? "desk" : kase.path === "ambulance" ? "ambulance" : "route");
+  };
+  return (
+    <div className={`req-status ${status[2]}`}>
+      <button type="button" className="req-status-main" onClick={open}>
+        <span className={`bd ${status[2]}`}>{status[0]}</span>
+        <b>{kase.id} · {kase.what}</b>
+        <small>{kase.state === "declined" ? `${where}: ${kase.declineReason || "could not take it"}` : `${where} · ${status[1]}`}</small>
+      </button>
+      {kase.state === "declined" ? (
+        <div className="req-status-actions">
+          <button type="button" className="btn pri sm" onClick={() => { clearCase(); go("help"); }}>Choose other help</button>
+          <button type="button" className="btn out sm" onClick={() => clearCase()}>Dismiss</button>
+        </div>
+      ) : (
+        <Icon n="chevR" c="chev" />
+      )}
+    </div>
+  );
+}
+
+function DeclinedPanel({ where, reason, onOther, onCall }) {
+  return (
+    <div className="declined-panel" role="alert">
+      <span className="ico red"><Icon n="alert" /></span>
+      <div className="grow">
+        <b>{where} could not take this request</b>
+        <small>{reason ? `${reason.replace(/[.!?]*$/, "")}.` : "They did not give a reason."} Your request is closed there, so nothing more will come from them.</small>
+      </div>
+      <div className="declined-actions">
+        <Btn onClick={onOther}>Choose other help</Btn>
+        <Btn tone="out" onClick={onCall}><Icon n="phone" c="m" />Call 999 or 112</Btn>
+      </div>
+    </div>
   );
 }
 
@@ -802,6 +911,7 @@ function Home() {
         </div>
         </div>
         <div className="desk-grid">
+        <RequestStatusCard />
         <button type="button" className={`sn${on ? "" : " off"}`} onClick={() => go("safetyHome", null, true)}>
           <i />Safety Net {on ? "on, location saved" : "off"}
         </button>
@@ -1244,7 +1354,7 @@ const CASE_STEPS = [
 ];
 
 function Ambulance() {
-  const { place, back, openSheet, kase, go, refreshCase, places, showToast, moveCase } = useApp();
+  const { place, back, openSheet, kase, go, refreshCase, places, showToast, moveCase, clearCase } = useApp();
   const refreshRef = useRef(refreshCase);
   const moveRef = useRef(moveCase);
   refreshRef.current = refreshCase;
@@ -1280,7 +1390,8 @@ function Ambulance() {
     });
   }, [kase?.id, kase?.where, kase?.state]);
   const amb = pointAlong(route, stage >= 2 ? 0.62 : 0.08);
-  const copy = CASE_COPY[stage];
+  const declined = kase?.state === "declined";
+  const copy = declined ? ["Request declined", `${item.name} could not take it`, "Declined"] : CASE_COPY[stage];
   return (
     <Screen bare>
       <MapBoard className="map mapfull" opts={{ route, pins: [place], you, amb }}>
@@ -1294,28 +1405,36 @@ function Ambulance() {
             <h3 style={{ font: "800 20px var(--font)", letterSpacing: "-.01em" }}>{copy[0]}</h3>
             <div className="fine" style={{ textAlign: "left" }}>{copy[1]}</div>
           </div>
-          <div className="eta">{stage >= 2 ? "…" : item.amb || "—"}<small>{stage >= 2 ? "" : "min"}</small></div>
+          {declined ? null : <div className="eta">{stage >= 2 ? "…" : item.amb || "—"}<small>{stage >= 2 ? "" : "min"}</small></div>}
         </div>
-        <div className="tl">
+        {declined ? (
+          <DeclinedPanel
+            where={item.name}
+            reason={kase.declineReason}
+            onOther={() => { clearCase(); go("help"); }}
+            onCall={() => openSheet("lines")}
+          />
+        ) : null}
+        {declined ? null : <div className="tl">
           {CASE_STEPS.map(([title, detail], index) => (
             <div key={title} className={`st${index < stage || stage === 3 ? " done" : ""}${index === stage && stage < 3 ? " now" : ""}`}>
               <i><Icon n="check" c="s" /></i>
               <div><b>{title}</b><small>{detail}</small></div>
             </div>
           ))}
-        </div>
-        {crew ? (
+        </div>}
+        {crew && !declined ? (
           <div className="crew">
             <span className="ico green"><Icon n="amb" /></span>
-            <span><b style={{ display: "block", fontSize: 15 }}>Paramedic team A</b><small style={{ color: "var(--ink2)", fontWeight: 500 }}>Ambulance UBE 214A</small></span>
-            <button type="button" className="callb" aria-label="Call the crew" onClick={() => showToast("Calling the ambulance crew...")}><Icon n="phone" /></button>
+            <span><b style={{ display: "block", fontSize: 15 }}>{item.name}</b><small style={{ color: "var(--ink2)", fontWeight: 500 }}>Their team has your request</small></span>
+            {item.phone ? <a className="callb" aria-label={`Call ${item.name}`} href={`tel:${String(item.phone).replace(/\s/g, "")}`}><Icon n="phone" /></a> : null}
           </div>
         ) : null}
-        <div className="row" style={{ gap: 10 }}>
+        <div className="row" style={{ gap: 10, display: declined ? "none" : undefined }}>
           <Btn tone="out sm" onClick={() => showToast(kase?.where === "gps" ? "Your phone is sharing this location with the desk." : "This case used a saved or written place.")}><Icon n="share" c="m" />Live location</Btn>
         </div>
         <div className="row" style={{ justifyContent: "space-between" }}>
-          <button type="button" className="link red" onClick={() => openSheet("cancel")}>Cancel request</button>
+          {declined ? <span /> : <button type="button" className="link red" onClick={() => openSheet("cancel")}>Cancel request</button>}
           <button type="button" className="sos-pill lap-quiet" onClick={() => openSheet("lines")}><Icon n="phone" c="s" />999 / 112</button>
         </div>
       </div>
@@ -1451,7 +1570,7 @@ function Other() {
 }
 
 function Desk() {
-  const { otherType, kase, user, go, setReport, moveCase, refreshCase, showToast } = useApp();
+  const { otherType, kase, user, go, setReport, moveCase, refreshCase, showToast, clearCase, openSheet } = useApp();
   const type = OTHER.find((item) => item[0] === otherType);
   const desk = DESKS[otherType];
   const connected = desk[1];
@@ -1489,6 +1608,14 @@ function Desk() {
           ]}
         />
         <div className="form-side">
+        {current.state === "declined" ? (
+          <DeclinedPanel
+            where={current.desk || desk[0]}
+            reason={current.declineReason}
+            onOther={() => { clearCase(); go("home", null, true); }}
+            onCall={() => openSheet("lines")}
+          />
+        ) : null}
         <div className="card" style={{ display: "flex", flexDirection: "column", gap: 12 }}>
           <div className="row">
             <span className={`ico ${connected ? "green" : "gold"}`}><Icon n={type[2]} /></span>
@@ -1700,6 +1827,7 @@ function Account() {
     ["home", "gold", "Home location", user.home.text, () => go("profile2")],
     ["radio", "green", "Safety Net", safety.mode === "always" ? "Always on" : safety.mode === "trips" ? "Trips and cases only" : "Off", () => go("safetyHome", null, true)],
     ["globe", "plain", "Language", user.lang, () => openSheet("lang")],
+    ["lock", "plain", "Password", user.hasPassword ? "Set. Change it any time" : "Not set. Add one to skip the code", () => openSheet("password")],
   ];
   function choosePhoto(event) {
     const file = event.target.files?.[0];
@@ -1810,6 +1938,8 @@ const screens = {
   partnerSignin: PartnerSignIn,
   partnerQueue: PartnerQueue,
   partnerCase: PartnerCase,
+  partnerLogin: PartnerLogin,
+  partnerHome: PartnerHome,
   safetyHome: SafetyHome,
   walk: Walk,
   alert: AlertView,
@@ -1859,6 +1989,40 @@ export function EdgeLine() {
 export function Toast() {
   const { toast } = useApp();
   return <div className={`toast${toast ? " show" : ""}`} role="status">{toast}</div>;
+}
+
+function passwordProblem(value, again) {
+  if (value.length < PASSWORD_MIN) return `Choose a password of at least ${PASSWORD_MIN} characters.`;
+  if (value !== again) return "The two passwords do not match.";
+  return "";
+}
+
+function PasswordSheet() {
+  const { user, closeSheet, showToast, changePassword } = useApp();
+  const [value, setValue] = useState("");
+  const [again, setAgain] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [problem, setProblem] = useState("");
+  async function save() {
+    const next = passwordProblem(value, again);
+    setProblem(next);
+    if (next) return;
+    setSaving(true);
+    const ok = await changePassword(value);
+    setSaving(false);
+    if (!ok) return;
+    closeSheet();
+    showToast("Password saved");
+  }
+  return (
+    <>
+      <h3>{user.hasPassword ? "Change password" : "Add a password"}</h3>
+      <p className="sub">Sign in with your {user.type === "student" ? "student email or phone" : "phone number"} and this password, without waiting for a code.</p>
+      <Field label="New password"><Inp icon="lock" type="password" autoComplete="new-password" value={value} placeholder={`At least ${PASSWORD_MIN} characters`} onChange={setValue} /></Field>
+      <Field label="New password again" error={problem}><Inp icon="lock" type="password" autoComplete="new-password" value={again} onChange={setAgain} /></Field>
+      <Btn disabled={saving} onClick={save}>{saving ? "Saving..." : "Save password"}</Btn>
+    </>
+  );
 }
 
 export function Sheets() {
@@ -1966,6 +2130,9 @@ export function Sheets() {
         <Btn onClick={() => { closeSheet(); showToast("Saved"); }}>Save</Btn>
       </>
     );
+  }
+  if (sheet === "password") {
+    body = <PasswordSheet />;
   }
   if (sheet === "lang") {
     body = (

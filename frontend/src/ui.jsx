@@ -1,4 +1,6 @@
 import { useEffect, useRef, useState } from "react";
+import L from "leaflet";
+import "leaflet/dist/leaflet.css";
 import sprite from "./sprite.html?raw";
 import { YOU, homePoint } from "./map.js";
 import { useApp } from "./app-state.js";
@@ -54,7 +56,7 @@ export function Field({ label, children, error }) {
   );
 }
 
-export function Inp({ icon, pre, value, onChange, placeholder, type, mode, readOnly }) {
+export function Inp({ icon, pre, value, onChange, placeholder, type, mode, readOnly, autoComplete = "off", name }) {
   return (
     <div className="inp">
       {icon ? <Icon n={icon} /> : null}
@@ -64,7 +66,8 @@ export function Inp({ icon, pre, value, onChange, placeholder, type, mode, readO
         placeholder={placeholder || ""}
         type={type}
         inputMode={mode}
-        autoComplete="off"
+        autoComplete={autoComplete}
+        name={name}
         readOnly={readOnly}
         onChange={(event) => onChange?.(event.target.value)}
       />
@@ -100,10 +103,17 @@ export function Steps({ n, total }) {
 }
 
 const MAPS_KEY = import.meta.env.VITE_GOOGLE_MAPS_API_KEY || "";
+const OSM_TILES = "https://tile.openstreetmap.org/{z}/{x}/{y}.png";
+const OSM_CREDIT = '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>';
+
+// Google refuses the key after the script loads (quota used up, address not allowed).
+// Once that happens, every map on the page uses OpenStreetMap instead.
+let googleDenied = !MAPS_KEY;
 
 let mapsPromise;
 function loadMaps() {
   window.gm_authFailure = () => {
+    googleDenied = true;
     window.dispatchEvent(new CustomEvent("afriresq-maps-denied"));
   };
   if (window.google?.maps) return Promise.resolve(window.google.maps);
@@ -142,16 +152,42 @@ export function MapBoard({ opts = {}, className = "map", style, children, onPin,
   const onTapRef = useRef(onTap);
   const [ready, setReady] = useState(false);
   const [failed, setFailed] = useState(false);
+  const [engine, setEngine] = useState(googleDenied ? "osm" : "google");
   onPinRef.current = onPin;
   onTapRef.current = onTap;
 
   useEffect(() => {
-    const deny = () => setFailed(true);
+    const deny = () => {
+      googleDenied = true;
+      setEngine("osm");
+    };
     window.addEventListener("afriresq-maps-denied", deny);
     return () => window.removeEventListener("afriresq-maps-denied", deny);
   }, []);
 
   useEffect(() => {
+    if (engine !== "osm") return undefined;
+    mapRef.current = null;
+    setReady(false);
+    let map;
+    try {
+      map = L.map(node.current, { zoomControl: false, attributionControl: true }).setView(YOU, 14);
+      map.attributionControl.setPrefix(false);
+      L.tileLayer(OSM_TILES, { maxZoom: 19, attribution: OSM_CREDIT }).addTo(map);
+    } catch {
+      setFailed(true);
+      return undefined;
+    }
+    mapRef.current = map;
+    setReady(true);
+    return () => {
+      map.remove();
+      if (mapRef.current === map) mapRef.current = null;
+    };
+  }, [engine]);
+
+  useEffect(() => {
+    if (engine !== "google") return undefined;
     let cancel = false;
     loadMaps()
       .then((maps) => {
@@ -167,12 +203,14 @@ export function MapBoard({ opts = {}, className = "map", style, children, onPin,
         setReady(true);
       })
       .catch(() => {
-        if (!cancel) setFailed(true);
+        if (cancel) return;
+        googleDenied = true;
+        setEngine("osm");
       });
     return () => {
       cancel = true;
     };
-  }, []);
+  }, [engine]);
 
   const spec = [
     (opts.pins || []).join(","),
@@ -187,8 +225,69 @@ export function MapBoard({ opts = {}, className = "map", style, children, onPin,
 
   useEffect(() => {
     const map = mapRef.current;
+    if (!ready || !map || engine !== "osm") return undefined;
+    const drawn = [];
+    const points = [];
+    const dot = (point, fill, stroke, radius, interactive = false) => {
+      if (!point) return null;
+      const marker = L.circleMarker(point, {
+        radius,
+        fillColor: fill,
+        fillOpacity: 1,
+        color: stroke,
+        weight: 3,
+        interactive,
+      }).addTo(map);
+      drawn.push(marker);
+      points.push(point);
+      return marker;
+    };
+
+    if (opts.route?.length) {
+      const path = opts.route.map(latLng).filter(Boolean);
+      drawn.push(L.polyline(path, { color: "#0B8F4D", weight: 5, opacity: 0.9, interactive: false }).addTo(map));
+      points.push(...path);
+    }
+    if (opts.trail?.length) {
+      const path = opts.trail.map(latLng).filter(Boolean);
+      drawn.push(L.polyline(path, { color: "#0B8F4D", weight: 4, opacity: 0.9, dashArray: "6 6", interactive: false }).addTo(map));
+      points.push(...path);
+    }
+    (opts.pins || []).forEach((id) => {
+      const place = places[id];
+      const uni = student && place?.uni === user.uni;
+      const listed = !place?.conn && !uni;
+      const marker = dot(
+        latLng(place?.ll),
+        uni ? "#6552E0" : listed ? "#ffffff" : "#0B8F4D",
+        listed ? "#0B8F4D" : "#ffffff",
+        opts.sel === id ? 11 : 8,
+        true,
+      );
+      marker?.on("click", () => onPinRef.current?.(id));
+    });
+    dot(latLng(opts.you), "#0B8F4D", "#ffffff", 8);
+    if (opts.home) dot(latLng(homePoint(user)), "#E39A0B", "#ffffff", 8);
+    dot(latLng(opts.amb), "#D93636", "#ffffff", 9);
+
+    const timer = setTimeout(() => {
+      map.invalidateSize();
+      if (points.length === 1) map.setView(points[0], 16);
+      else if (points.length > 1) map.fitBounds(L.latLngBounds(points), { padding: [36, 36] });
+    }, 60);
+    const tap = (event) => onTapRef.current?.({ lat: event.latlng.lat, lng: event.latlng.lng });
+    if (onTapRef.current) map.on("click", tap);
+    return () => {
+      clearTimeout(timer);
+      map.off("click", tap);
+      drawn.forEach((item) => item.remove());
+    };
+  }, [ready, engine, spec, places]);
+
+  useEffect(() => {
+    const map = mapRef.current;
     const maps = window.google?.maps;
-    if (!ready || !map || !maps) return undefined;
+    if (!ready || !map || !maps || engine !== "google") return undefined;
     const drawn = [];
     const bounds = new maps.LatLngBounds();
     let count = 0;
@@ -279,12 +378,12 @@ export function MapBoard({ opts = {}, className = "map", style, children, onPin,
       if (tap) maps.event.removeListener(tap);
       drawn.forEach((item) => item.setMap(null));
     };
-  }, [ready, spec, places]);
+  }, [ready, engine, spec, places]);
 
   return (
     <div className={className} style={style}>
-      <div ref={node} className="gmap" />
-      {failed ? <p className="map-fallback">Google Maps is switched off for this key. Enable the Maps JavaScript API, then reload.</p> : null}
+      <div key={engine} ref={node} className="gmap" />
+      {failed ? <p className="map-fallback">The map cannot load right now. Check the internet connection. Everything else still works.</p> : null}
       {children}
     </div>
   );

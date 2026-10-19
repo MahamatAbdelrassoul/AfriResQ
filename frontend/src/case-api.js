@@ -39,3 +39,10 @@ export async function updateCase(id, patch, token) {
   });
   return readBody(res);
 }
+
+// The signed-in person's own cases, newest first.
+export async function listMyCases(phone, token) {
+  const params = new URLSearchParams({ phone: String(phone || "").replace(/\D/g, "") });
+  const res = await fetch(`/api/cases?${params}`, { headers: authHeaders(token) });
+  return readBody(res);
+}

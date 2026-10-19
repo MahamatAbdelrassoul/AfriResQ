@@ -114,7 +114,7 @@ export function CasesPanel({ token, places, version, act, busy, onFail, initialF
         <Seg
           value={filter}
           onChange={setFilter}
-          options={[["open", "Open"], ["waiting", "Waiting"], ["closed", "Closed"], ["cancelled", "Cancelled"], ["all", "All"]]}
+          options={[["open", "Open"], ["waiting", "Waiting"], ["closed", "Closed"], ["declined", "Declined"], ["cancelled", "Cancelled"], ["all", "All"]]}
         />
         <div className="team-tools-row">
           <Search value={query} onChange={setQuery} placeholder="Case number, name, phone, or place" />
@@ -155,6 +155,7 @@ export function CasesPanel({ token, places, version, act, busy, onFail, initialF
                 </div>
                 {item.awake ? <div className="kv"><span>Awake</span><b>{item.awake}</b></div> : null}
                 {item.detail ? <div className="kv"><span>Report</span><b>{item.detail}</b></div> : null}
+                {item.declineReason ? <div className="kv"><span>Declined because</span><b>{item.declineReason}</b></div> : null}
                 {item.rating ? <div className="kv"><span>Rating</span><b>{item.rating} of 5</b></div> : null}
                 <div className="kv"><span>Last change</span><b>{ago(item.updatedAt)}</b></div>
                 <div className="team-form-row">
@@ -456,17 +457,96 @@ export function PlacesPanel({ token, places, act, busy }) {
   );
 }
 
-export function PartnersPanel({ token, applications, act, busy }) {
+const AVAILABILITY_LABEL = { available: "Available", busy: "Busy", unavailable: "Unavailable", offline: "Not set" };
+
+const LOCATED = {
+  address: " Its pin was placed from the address, so check it under Places.",
+  request: "",
+  team: "",
+};
+
+export function PartnersPanel({ token, applications, places, act, busy }) {
   const [filter, setFilter] = useState("pending");
+  const [locating, setLocating] = useState(null);
   const rows = applications.filter((item) => filter === "all" || item.status === filter);
+  const placeById = Object.fromEntries(places.map((place) => [place.id, place]));
+  const receiving = places.filter((place) => place.receives);
+
+  function codeNotice(organisation, body) {
+    if (body.code) return `The code could not be emailed or texted. Give ${organisation} this code by phone: ${body.code}. It is shown only once.`;
+    return `Sign-in code sent to ${body.sentTo.join(", ")}.`;
+  }
+
+  // Confirming or creating a place can come back asking for a map point. Then the card asks the team for one.
+  function located(item, mode, run) {
+    act(async () => {
+      try {
+        const message = await run();
+        setLocating(null);
+        return message;
+      } catch (err) {
+        if (err.data?.needsLocation) {
+          setLocating({ id: item.id, mode, lat: "", lng: "" });
+          return err.message;
+        }
+        throw err;
+      }
+    });
+  }
+
+  function approve(item, point = {}) {
+    located(item, "approve", async () => {
+      const body = await teamCall(token, `/partners/${item.id}`, { method: "PATCH", body: { status: "approved", ...point } });
+      const where = body.placeCreated ? "now has its own place on the map and works its cases" : "works its place again";
+      return `${item.organisation} is confirmed and ${where}.${LOCATED[body.located] || ""} ${codeNotice(item.organisation, body)}`;
+    });
+  }
+
+  function createPlace(item, point = {}) {
+    located(item, "place", async () => {
+      const body = await teamCall(token, `/partners/${item.id}/place`, { method: "POST", body: point });
+      return `${item.organisation} now has its own place on the map and works its cases.${LOCATED[body.located] || ""}`;
+    });
+  }
+
+  function setActive(item, active) {
+    act(async () => {
+      await teamCall(token, `/partners/${item.id}/active`, { method: "PATCH", body: { active } });
+      return active
+        ? `${item.organisation} is receiving cases again.`
+        : `${item.organisation} is paused. Its place stops receiving cases and its dashboard shows no cases until you resume it.`;
+    });
+  }
+
+  function sendCode(item) {
+    act(async () => {
+      const body = await teamCall(token, `/partners/${item.id}/code`, { method: "POST" });
+      return `${item.organisation}: ${codeNotice(item.organisation, body)} The old code no longer works.`;
+    });
+  }
+
+  function connect(item, placeId) {
+    act(async () => {
+      const body = await teamCall(token, `/partners/${item.id}/place`, { method: "PATCH", body: { placeId } });
+      return placeId
+        ? `${item.organisation} now works the cases sent to ${body.placeName}.`
+        : `${item.organisation} is no longer connected to a place.`;
+    });
+  }
 
   function decide(item, status) {
     act(async () => {
       await teamCall(token, `/partners/${item.id}`, { method: "PATCH", body: { status } });
-      if (status === "approved") return `${item.organisation} is confirmed. Add it under Places to put it on the map.`;
-      if (status === "declined") return `${item.organisation} was declined.`;
-      return `${item.organisation} is waiting again.`;
+      setLocating(null);
+      if (status === "declined") return `${item.organisation} was declined. Its code no longer works and its place left the map, unless cases were already sent to it.`;
+      return `${item.organisation} is waiting again. Its code no longer works and its place is paused.`;
     });
+  }
+
+  function placeState(item) {
+    const place = placeById[item.placeId];
+    if (!place) return { label: "No place yet", tone: "warn" };
+    return place.receives ? { label: `Live · ${place.name}`, tone: "ok", place } : { label: `Paused · ${place.name}`, tone: "warn", place };
   }
 
   return (
@@ -476,36 +556,92 @@ export function PartnersPanel({ token, applications, act, busy }) {
       </div>
       <div className="team-list">
         {!rows.length ? <Empty title="No requests here" sub="A hospital, a police station, or another service appears here after it asks to join." /> : null}
-        {rows.map((item) => (
-          <article className="team-card" key={item.id}>
-            <div className="team-desk">
-              <span className="grow">
-                <b>{item.organisation}</b>
-                <small>{item.primaryCategory}{item.extraCategories.length ? ` · also ${item.extraCategories.join(", ")}` : ""}</small>
-                <small>{item.phone} · {item.email}</small>
-                <small>{item.address}{item.districts ? ` · ${item.districts}` : ""}</small>
-                {item.services ? <small>Services: {item.services}</small> : null}
-                {item.hours ? <small>Hours: {item.hours}{item.emergencyReady ? " · ready for emergencies" : ""}</small> : null}
-                {item.licence ? <small>Licence: {item.licence}</small> : null}
-                <small>Contact: {item.representativeName} · {item.representativePhone}{item.representativeEmail ? ` · ${item.representativeEmail}` : ""}</small>
-                <small>Asked {ago(item.createdAt)}</small>
-              </span>
-              <em className={`bd ${item.status === "approved" ? "ok" : item.status === "declined" ? "warn" : ""}`}>
-                {item.status === "approved" ? "Confirmed" : item.status === "declined" ? "Declined" : "Waiting"}
-              </em>
-            </div>
-            <div className="team-actions">
-              {item.status === "pending" ? (
-                <>
-                  <button type="button" className="btn pri sm" disabled={busy} onClick={() => decide(item, "approved")}>Confirm</button>
-                  <button type="button" className="btn out sm" disabled={busy} onClick={() => decide(item, "declined")}>Decline</button>
-                </>
-              ) : (
-                <button type="button" className="btn out sm" disabled={busy} onClick={() => decide(item, "pending")}>Move back to waiting</button>
-              )}
-            </div>
-          </article>
-        ))}
+        {rows.map((item) => {
+          const state = item.status === "approved" ? placeState(item) : null;
+          const asking = locating?.id === item.id ? locating : null;
+          const point = asking ? { lat: asking.lat, lng: asking.lng } : null;
+          const pointOk = point && Number.isFinite(Number(point.lat)) && Number.isFinite(Number(point.lng)) && point.lat !== "" && point.lng !== "";
+          return (
+            <article className="team-card" key={item.id}>
+              <div className="team-desk">
+                <span className="grow">
+                  <b>{item.organisation}</b>
+                  <small>{item.primaryCategory}{item.extraCategories.length ? ` · also ${item.extraCategories.join(", ")}` : ""}</small>
+                  <small>{item.phone} · {item.email}</small>
+                  <small>{item.address}{item.districts ? ` · ${item.districts}` : ""}{item.baseLat != null ? ` · map point ${Number(item.baseLat).toFixed(4)}, ${Number(item.baseLng).toFixed(4)}` : " · no map point given"}</small>
+                  {item.services ? <small>Services: {item.services}</small> : null}
+                  {item.hours ? <small>Hours: {item.hours}{item.emergencyReady ? " · ready for emergencies" : ""}</small> : null}
+                  {item.licence ? <small>Licence: {item.licence}</small> : null}
+                  <small>Contact: {item.representativeName} · {item.representativePhone}{item.representativeEmail ? ` · ${item.representativeEmail}` : ""}</small>
+                  <small>Asked {ago(item.createdAt)}</small>
+                  {item.status === "approved" ? <small>{item.codeSentAt ? `Sign-in code sent ${ago(item.codeSentAt)}` : "No sign-in code yet"} · {AVAILABILITY_LABEL[item.availability] || item.availability}</small> : null}
+                  {state?.place ? (
+                    <div className="inp team-select" style={{ marginTop: 8, maxWidth: 360 }}>
+                      <Icon n="pin" c="m" />
+                      <select value={item.placeId} disabled={busy} aria-label="Place this partner works" onChange={(event) => connect(item, event.target.value)}>
+                        <option value="">Not connected to a place</option>
+                        {[...new Map([state.place, ...receiving].map((place) => [place.id, place])).values()].map((place) => {
+                          const owner = applications.find((other) => other.placeId === place.id && other.id !== item.id);
+                          return <option key={place.id} value={place.id} disabled={Boolean(owner)}>{place.name}{owner ? ` (${owner.organisation})` : ""}</option>;
+                        })}
+                      </select>
+                    </div>
+                  ) : null}
+                </span>
+                <span style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 6 }}>
+                  <em className={`bd ${item.status === "approved" ? "ok" : item.status === "declined" ? "warn" : ""}`}>
+                    {item.status === "approved" ? "Confirmed" : item.status === "declined" ? "Declined" : "Waiting"}
+                  </em>
+                  {state ? <em className={`bd ${state.tone}`}>{state.label}</em> : null}
+                </span>
+              </div>
+              {asking ? (
+                <div className="team-card" style={{ margin: "4px 0 0", padding: 14, gap: 10 }}>
+                  <small>Where is {item.organisation} based? In Google Maps, right-click the spot and click the numbers to copy them.</small>
+                  <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                    <div className="inp" style={{ flex: "1 1 140px" }}>
+                      <input inputMode="decimal" placeholder="Latitude, e.g. 0.3304" value={asking.lat} onChange={(event) => setLocating({ ...asking, lat: event.target.value.trim() })} onPaste={(event) => {
+                        const pair = event.clipboardData.getData("text").split(",").map((part) => part.trim());
+                        if (pair.length === 2) {
+                          event.preventDefault();
+                          setLocating({ ...asking, lat: pair[0], lng: pair[1] });
+                        }
+                      }} />
+                    </div>
+                    <div className="inp" style={{ flex: "1 1 140px" }}>
+                      <input inputMode="decimal" placeholder="Longitude, e.g. 32.5701" value={asking.lng} onChange={(event) => setLocating({ ...asking, lng: event.target.value.trim() })} />
+                    </div>
+                  </div>
+                  <div className="team-actions">
+                    <button type="button" className="btn pri sm" disabled={busy || !pointOk} onClick={() => (asking.mode === "approve" ? approve(item, point) : createPlace(item, point))}>
+                      {asking.mode === "approve" ? "Confirm with this point" : "Create its place"}
+                    </button>
+                    <button type="button" className="btn out sm" disabled={busy} onClick={() => setLocating(null)}>Cancel</button>
+                  </div>
+                </div>
+              ) : null}
+              <div className="team-actions">
+                {item.status === "pending" ? (
+                  <>
+                    <button type="button" className="btn pri sm" disabled={busy} onClick={() => approve(item)}>Confirm</button>
+                    <button type="button" className="btn out sm" disabled={busy} onClick={() => decide(item, "declined")}>Decline</button>
+                  </>
+                ) : null}
+                {item.status === "approved" && !state.place ? (
+                  <button type="button" className="btn pri sm" disabled={busy} onClick={() => createPlace(item)}>Create its place</button>
+                ) : null}
+                {item.status === "approved" && state.place ? (
+                  state.place.receives
+                    ? <button type="button" className="btn out sm" disabled={busy} onClick={() => setActive(item, false)}>Pause</button>
+                    : <button type="button" className="btn pri sm" disabled={busy} onClick={() => setActive(item, true)}>Resume</button>
+                ) : null}
+                {item.status === "approved" ? <button type="button" className="btn out sm" disabled={busy} onClick={() => sendCode(item)}>Send a new code</button> : null}
+                {item.status === "declined" ? <button type="button" className="btn pri sm" disabled={busy} onClick={() => approve(item)}>Confirm</button> : null}
+                {item.status !== "pending" ? <button type="button" className="btn out sm" disabled={busy} onClick={() => decide(item, "pending")}>Move back to waiting</button> : null}
+              </div>
+            </article>
+          );
+        })}
       </div>
     </section>
   );
