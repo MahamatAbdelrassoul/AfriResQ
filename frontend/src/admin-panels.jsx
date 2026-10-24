@@ -555,7 +555,7 @@ export function PartnersPanel({ token, applications, places, act, busy }) {
         <Seg value={filter} onChange={setFilter} options={[["pending", "Waiting"], ["approved", "Confirmed"], ["declined", "Declined"], ["all", "All"]]} />
       </div>
       <div className="team-list">
-        {!rows.length ? <Empty title="No requests here" sub="A hospital, a police station, or another service appears here after it asks to join." /> : null}
+        {!rows.length ? <Empty title="No requests here" sub="A hospital, a police station, a university, or another service appears here after it asks to join." /> : null}
         {rows.map((item) => {
           const state = item.status === "approved" ? placeState(item) : null;
           const asking = locating?.id === item.id ? locating : null;
@@ -566,7 +566,7 @@ export function PartnersPanel({ token, applications, places, act, busy }) {
               <div className="team-desk">
                 <span className="grow">
                   <b>{item.organisation}</b>
-                  <small>{item.primaryCategory}{item.extraCategories.length ? ` · also ${item.extraCategories.join(", ")}` : ""}</small>
+                  <small>{item.applicantKind === "university" ? "University" : item.primaryCategory}{item.city ? ` · ${item.city}` : ""}{item.studentDomain ? ` · students use name@${item.studentDomain}` : ""}{item.extraCategories.length ? ` · also ${item.extraCategories.join(", ")}` : ""}</small>
                   <small>{item.phone} · {item.email}</small>
                   <small>{item.address}{item.districts ? ` · ${item.districts}` : ""}{item.baseLat != null ? ` · map point ${Number(item.baseLat).toFixed(4)}, ${Number(item.baseLng).toFixed(4)}` : " · no map point given"}</small>
                   {item.services ? <small>Services: {item.services}</small> : null}

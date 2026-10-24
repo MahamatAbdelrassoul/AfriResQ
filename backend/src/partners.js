@@ -87,7 +87,7 @@ async function geocode(row) {
     console.error("Finding partners from their address needs GOOGLE_MAPS_API_KEY in backend/.env, with the Geocoding API turned on.");
     return null;
   }
-  const address = [row.address, row.districts].filter(Boolean).join(", ");
+  const address = [row.address, row.city, row.districts].filter(Boolean).join(", ");
   try {
     const res = await fetch(
       `https://maps.googleapis.com/maps/api/geocode/json?address=${encodeURIComponent(address)}&components=country:UG&region=ug&key=${encodeURIComponent(key)}`,
@@ -194,6 +194,9 @@ function dashboardFromRow(row) {
   return {
     id: row.id,
     organisation: row.organisation,
+    applicantKind: row.applicant_kind || "organisation",
+    city: row.city || "",
+    studentDomain: row.student_domain || "",
     primaryCategory: row.primary_category,
     extraCategories: row.extra_categories || [],
     phone: row.phone,
@@ -260,7 +263,11 @@ export function partnerRouter(pool) {
   router.post("/", async (req, res) => {
     const body = req.body || {};
     const organisation = clean(body.organisation, 160);
-    const primary = clean(body.primaryCategory, 120);
+    const university = body.applicantKind === "university";
+    const primary = university ? "University" : clean(body.primaryCategory, 120);
+    const city = clean(body.city, 80);
+    const studentDomain = clean(body.studentDomain, 80).toLowerCase().replace(/^@/, "");
+    const domainOk = /^[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?\.[a-z]{2,}$/.test(studentDomain) && !studentDomain.includes("..");
     const extras = Array.isArray(body.extraCategories)
       ? [...new Set(body.extraCategories.map((item) => clean(item, 120)).filter((item) => item && item !== primary && CATEGORIES.has(item)))]
       : [];
@@ -278,8 +285,12 @@ export function partnerRouter(pool) {
     const baseLng = Number(body.baseLng);
     const hasBase = body.baseLat != null && body.baseLat !== "" && body.baseLng != null && body.baseLng !== ""
       && inRange(baseLat, baseLng);
-    if (!organisation || !CATEGORIES.has(primary) || !phone || !email || !address || !representativeName || !representativePhone) {
-      res.status(400).json({ error: "Fill in the organisation, the main service, the phone, the email, the address, and the person who can speak for it." });
+    if (!organisation || !phone || !email || !address || !representativeName || !representativePhone || (university ? !city || !domainOk : !CATEGORIES.has(primary))) {
+      res.status(400).json({
+        error: university
+          ? "Fill in the university, the city, the student email domain, the phone, the email, the address, and the person who can speak for it."
+          : "Fill in the organisation, the main service, the phone, the email, the address, and the person who can speak for it.",
+      });
       return;
     }
     try {
@@ -287,8 +298,8 @@ export function partnerRouter(pool) {
         `insert into partner_applications (
            organisation, primary_category, extra_categories, phone, email, address, districts,
            services, hours, emergency_ready, licence, representative_name, representative_phone, representative_email,
-           base_lat, base_lng
-         ) values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)
+           base_lat, base_lng, applicant_kind, city, student_domain
+         ) values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19)
          returning id, status`,
         [
           organisation,
@@ -307,6 +318,9 @@ export function partnerRouter(pool) {
           representativeEmail,
           hasBase ? baseLat : null,
           hasBase ? baseLng : null,
+          university ? "university" : "organisation",
+          university ? city : "",
+          university && domainOk ? studentDomain : "",
         ],
       );
       res.status(201).json({ id: saved.rows[0].id, status: saved.rows[0].status });

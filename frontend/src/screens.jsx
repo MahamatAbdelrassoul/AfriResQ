@@ -242,10 +242,13 @@ function PartnerBar({ title, sub }) {
 
 function PartnerJoin() {
   const [step, setStep] = useState("kind");
+  const [applicantKind, setApplicantKind] = useState("organisation");
   const [primary, setPrimary] = useState("");
   const [extras, setExtras] = useState([]);
   const [form, setForm] = useState({
     organisation: "",
+    city: "",
+    studentDomain: "",
     phone: "",
     email: "",
     address: "",
@@ -271,9 +274,9 @@ function PartnerJoin() {
     try {
       const fix = await readFix();
       setForm((current) => ({ ...current, baseLat: fix.lat.toFixed(6), baseLng: fix.lng.toFixed(6) }));
-      setLocateNote(`Location found, within about ${fix.accuracy} m. Only use it if you are at the base now.`);
+      setLocateNote(university ? "This phone's location is saved. Use it only if you are at the campus now." : "This phone's location is saved. Use it only if you are at the base now.");
     } catch {
-      setLocateNote("The browser did not share a location. Type the latitude and longitude instead.");
+      setLocateNote("The phone did not share a location. The address is enough.");
     } finally {
       setLocating(false);
     }
@@ -288,7 +291,7 @@ function PartnerJoin() {
     function onPop(event) {
       if (event.state?.screen !== "partnerJoin") return;
       const next = event.state.step;
-      setStep(next === "details" || next === "pending" ? next : "kind");
+      setStep(["service", "details", "pending"].includes(next) ? next : "kind");
     }
     window.addEventListener("popstate", onPop);
     return () => window.removeEventListener("popstate", onPop);
@@ -320,7 +323,7 @@ function PartnerJoin() {
       const res = await fetch("/api/partners", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ...form, primaryCategory: primary, extraCategories: extras }),
+        body: JSON.stringify({ ...form, applicantKind, primaryCategory: primary, extraCategories: extras }),
       });
       const body = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(body.error || "The request was not saved.");
@@ -332,14 +335,16 @@ function PartnerJoin() {
     }
   }
 
+  const university = applicantKind === "university";
+
   if (step === "pending") {
     return (
       <Screen>
         <PartnerBar title="Pending verification" sub={form.organisation} />
         <div className="body partner-join">
           <Hdr title="Pending verification" sub={form.organisation} sos={false} />
-          <Note icon="lock">AfriResQ has the request. This organisation will not receive a case until the team confirms it. Call 999 or 112 if someone needs help now.</Note>
-          <Note icon="pin">Once confirmed, your organisation gets its own place on the AfriResQ map and receives cases there.</Note>
+          <Note icon="lock">AfriResQ has the request. This {university ? "university" : "organisation"} will not receive a case until the team confirms it. Call 999 or 112 if someone needs help now.</Note>
+          <Note icon="pin">Once confirmed, your {university ? "university" : "organisation"} gets its own place on the AfriResQ map and receives cases there.</Note>
           <Note icon="mail">Once confirmed, a sign-in code goes to {form.email || "the official email"} and by SMS to {form.representativeName || "the representative"}. Use it under Partner sign-in on the welcome screen.</Note>
         </div>
       </Screen>
@@ -349,32 +354,37 @@ function PartnerJoin() {
   if (step === "details") {
     return (
       <Screen>
-        <PartnerBar title="About the organisation" sub={primary} />
+        <PartnerBar title={university ? "About the university" : "About the organisation"} sub={university ? "University" : primary} />
         <div className="body partner-join">
-          <Hdr title="About the organisation" sub={primary} sos={false} />
+          <Hdr title={university ? "About the university" : "About the organisation"} sub={university ? "University" : primary} sos={false} />
           <div className="form-side">
-            <Field label="Organisation name">
-              <Inp value={form.organisation} placeholder="Registered name" onChange={set("organisation")} />
+            <Field label={university ? "University name" : "Organisation name"}>
+              <Inp value={form.organisation} placeholder={university ? "Kyambogo University" : "Registered name"} onChange={set("organisation")} />
             </Field>
+            {university ? (
+              <>
+                <Field label="City">
+                  <Inp icon="pin" value={form.city} placeholder="Kampala" onChange={set("city")} />
+                </Field>
+                <Field label="Student email domain">
+                  <Inp icon="mail" value={form.studentDomain} placeholder="students.kyu.ac.ug" onChange={set("studentDomain")} />
+                </Field>
+                <Note>A student will later join with name@{form.studentDomain || "students.kyu.ac.ug"}.</Note>
+              </>
+            ) : null}
             <Field label="Official telephone">
               <Inp icon="phone" pre="+256" mode="tel" value={form.phone} placeholder="7XX XXX XXX" onChange={set("phone")} />
             </Field>
             <Field label="Official email">
               <Inp icon="mail" type="email" value={form.email} placeholder="name@organisation.ug" onChange={set("email")} />
             </Field>
-            <Field label="Physical address">
-              <Inp icon="pin" value={form.address} placeholder="Street and town" onChange={set("address")} />
+            <Field label={university ? "Campus address" : "Physical address"}>
+              <Inp icon="pin" value={form.address} placeholder={university ? "Kyambogo Road, Banda" : "Street and town"} onChange={set("address")} />
             </Field>
-            <Field label="Where the base is on the map">
-              <div style={{ display: "flex", gap: 8 }}>
-                <Inp icon="pin" mode="decimal" value={form.baseLat} placeholder="Latitude, 0.3304" onChange={set("baseLat")} />
-                <Inp mode="decimal" value={form.baseLng} placeholder="Longitude, 32.5701" onChange={set("baseLng")} />
-              </div>
-            </Field>
-            <button type="button" className="link left" disabled={locating} onClick={useHere}>{locating ? "Finding the location…" : "Use this device's location"}</button>
-            <Note icon="pin">{locateNote || "Once confirmed, your organisation appears here on the AfriResQ map and receives cases. In Google Maps, right-click your base and click the numbers to copy them."}</Note>
-            <Field label="Operating districts">
-              <Inp value={form.districts} placeholder="Kampala, Wakiso" onChange={set("districts")} />
+            <button type="button" className="link left" disabled={locating} onClick={useHere}>{locating ? "Finding the location…" : (university ? "I am at the campus now" : "I am at the base now")}</button>
+            <Note icon="pin">{locateNote || (university ? "The address is enough. AfriResQ finds the campus from it. Use the button only if you are standing there." : "The address is enough. AfriResQ finds the base from it. Use the button only if you are standing there.")}</Note>
+            <Field label={university ? "Other campuses, if any" : "Operating districts"}>
+              <Inp value={form.districts} placeholder={university ? "Mukono campus" : "Kampala, Wakiso"} onChange={set("districts")} />
             </Field>
             <Field label="Services offered">
               <textarea className="area" value={form.services} placeholder="For example: medical transport, paramedics, event medical cover" onChange={(event) => set("services")(event.target.value)} />
@@ -389,7 +399,7 @@ function PartnerJoin() {
             <Field label="Licence or registration number">
               <Inp icon="lock" value={form.licence} placeholder="The number on the official document" onChange={set("licence")} />
             </Field>
-            <Field label="Person who can speak for the organisation">
+            <Field label={`Person who can speak for the ${university ? "university" : "organisation"}`}>
               <Inp icon="user" value={form.representativeName} placeholder="Full name" onChange={set("representativeName")} />
             </Field>
             <Field label="Their telephone">
@@ -398,8 +408,26 @@ function PartnerJoin() {
             <Field label="Their email">
               <Inp icon="mail" type="email" value={form.representativeEmail} placeholder="name@organisation.ug" onChange={set("representativeEmail")} />
             </Field>
-            {extras.length ? <Note>Also offered: {extras.join(", ")}.</Note> : null}
-            <Note icon="lock">The document file itself comes later. A confirmed organisation still does not receive cases until its service is connected.</Note>
+            {university ? (
+              <>
+                <ServicePicker
+                  label="A campus service to connect, if they have one"
+                  placeholder="Type to add a hospital, security desk, or other service"
+                  options={PARTNER_CATEGORIES.filter((item) => !extras.includes(item))}
+                  value=""
+                  keepValue={false}
+                  onPick={toggleExtra}
+                />
+                {extras.length ? (
+                  <div className="chips">
+                    {extras.map((item) => (
+                      <button type="button" className="chip on" key={item} onClick={() => toggleExtra(item)}>{item}</button>
+                    ))}
+                  </div>
+                ) : null}
+              </>
+            ) : extras.length ? <Note>Also offered: {extras.join(", ")}.</Note> : null}
+            <Note icon="lock">The document file itself comes later. A confirmed {university ? "university" : "organisation"} still does not receive cases until its service is connected.</Note>
           </div>
         </div>
         <div className="foot">
@@ -410,41 +438,63 @@ function PartnerJoin() {
     );
   }
 
+  if (step === "service") {
+    return (
+      <Screen>
+        <PartnerBar title="Join as a partner" sub="Choose the main service" />
+        <div className="body partner-join">
+          <Hdr title="Join as a partner" sub="Choose the main service" sos={false} />
+          <div className="form-side">
+            <p className="sub">One organisation can offer more than one service. AfriResQ confirms the request before any case is sent.</p>
+            <ServicePicker
+              label="Main service"
+              placeholder="Type to find a service"
+              options={PARTNER_CATEGORIES}
+              value={primary}
+              onPick={choosePrimary}
+            />
+            {primary ? (
+              <ServicePicker
+                label="Another service, if they offer one"
+                placeholder="Type to add another service"
+                options={PARTNER_CATEGORIES.filter((item) => item !== primary && !extras.includes(item))}
+                value=""
+                keepValue={false}
+                onPick={toggleExtra}
+              />
+            ) : null}
+            {extras.length ? (
+              <div className="chips">
+                {extras.map((item) => (
+                  <button type="button" className="chip on" key={item} onClick={() => toggleExtra(item)}>{item}</button>
+                ))}
+              </div>
+            ) : null}
+          </div>
+        </div>
+        <div className="foot">
+          <Btn disabled={!primary} onClick={() => showStep("details")}>Continue</Btn>
+        </div>
+      </Screen>
+    );
+  }
+
   return (
     <Screen>
-      <PartnerBar title="Join as a partner" sub="Choose the main service" />
+      <PartnerBar title="Join as a partner" sub="Who is joining" />
       <div className="body partner-join">
-        <Hdr title="Join as a partner" sub="Choose the main service" sos={false} />
+        <Hdr title="Join as a partner" sub="Who is joining" sos={false} />
         <div className="form-side">
-          <p className="sub">One organisation can offer more than one service. AfriResQ confirms the request before any case is sent.</p>
-          <ServicePicker
-            label="Main service"
-            placeholder="Type to find a service"
-            options={PARTNER_CATEGORIES}
-            value={primary}
-            onPick={choosePrimary}
-          />
-          {primary ? (
-            <ServicePicker
-              label="Another service, if they offer one"
-              placeholder="Type to add another service"
-              options={PARTNER_CATEGORIES.filter((item) => item !== primary && !extras.includes(item))}
-              value=""
-              keepValue={false}
-              onPick={toggleExtra}
-            />
-          ) : null}
-          {extras.length ? (
-            <div className="chips">
-              {extras.map((item) => (
-                <button type="button" className="chip on" key={item} onClick={() => toggleExtra(item)}>{item}</button>
-              ))}
-            </div>
-          ) : null}
+          <p className="sub">AfriResQ confirms the request before any case is sent. Call 999 or 112 if someone needs help now.</p>
+          <button type="button" className="door" onClick={() => { setApplicantKind("organisation"); setPrimary(""); showStep("service"); }}>
+            <span className="ico green"><Icon n="plus" c="l" /></span>
+            <span><b>An emergency service</b><small>A hospital, a police station, a rescue team, or another service.</small></span>
+          </button>
+          <button type="button" className="door" onClick={() => { setApplicantKind("university"); setPrimary("University"); setExtras([]); showStep("details"); }}>
+            <span className="ico violet"><Icon n="cap" c="l" /></span>
+            <span><b>A university</b><small>The university asks to join, then its students can sign up with their email.</small></span>
+          </button>
         </div>
-      </div>
-      <div className="foot">
-        <Btn disabled={!primary} onClick={() => showStep("details")}>Continue</Btn>
       </div>
     </Screen>
   );

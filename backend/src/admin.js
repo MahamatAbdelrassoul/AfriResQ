@@ -224,6 +224,9 @@ export function adminRouter(pool) {
       applications: applications.rows.map((row) => ({
         id: row.id,
         organisation: row.organisation,
+        applicantKind: row.applicant_kind || "organisation",
+        city: row.city || "",
+        studentDomain: row.student_domain || "",
         primaryCategory: row.primary_category,
         extraCategories: row.extra_categories || [],
         phone: row.phone,

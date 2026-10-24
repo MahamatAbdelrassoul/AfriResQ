@@ -212,6 +212,9 @@ end $$;
 alter table cases add column if not exists decline_reason text not null default '';
 
 -- Where the partner is based, given on the join form. Confirming the partner puts its place there.
+alter table partner_applications add column if not exists applicant_kind text not null default 'organisation';
+alter table partner_applications add column if not exists city text not null default '';
+alter table partner_applications add column if not exists student_domain text not null default '';
 alter table partner_applications add column if not exists base_lat double precision;
 alter table partner_applications add column if not exists base_lng double precision;
 
