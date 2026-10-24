@@ -66,6 +66,7 @@ function toRow(body) {
       text(safety.mode) || "always",
       safety.kin !== false,
       Number.isFinite(Number(safety.pings)) ? Number(safety.pings) : 3,
+      [5, 15, 30, 60].includes(Number(safety.wait)) ? Number(safety.wait) : 30,
       password ? hashCode(password) : "",
     ],
   };
@@ -78,6 +79,7 @@ export function fromRow(row) {
       mode: row.safety_mode,
       kin: row.safety_kin,
       pings: row.safety_pings,
+      wait: [5, 15, 30, 60].includes(Number(row.safety_wait_mins)) ? Number(row.safety_wait_mins) : 30,
     },
     user: {
       type: row.person_type,
@@ -110,7 +112,7 @@ const columns = `
   phone, phone_digits, person_type, name, email, university, student_no, hall, language,
   kin_name, kin_relation, kin_phone, home_text, home_lat, home_lng,
   blood, allergies, conditions, medications, share_medical,
-  profile_done, safety_mode, safety_kin, safety_pings, password_hash
+  profile_done, safety_mode, safety_kin, safety_pings, safety_wait_mins, password_hash
 `;
 
 export function peopleRouter(pool) {
@@ -146,7 +148,7 @@ export function peopleRouter(pool) {
       }
       const saved = await pool.query(
         `insert into people (${columns})
-         values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25)
+         values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26)
          on conflict (phone_digits) do update set
            phone = excluded.phone,
            person_type = excluded.person_type,
@@ -171,6 +173,7 @@ export function peopleRouter(pool) {
            safety_mode = excluded.safety_mode,
            safety_kin = excluded.safety_kin,
            safety_pings = excluded.safety_pings,
+           safety_wait_mins = excluded.safety_wait_mins,
            password_hash = case when excluded.password_hash <> '' then excluded.password_hash else people.password_hash end,
            updated_at = now()
          returning *`,

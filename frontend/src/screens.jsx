@@ -4,6 +4,7 @@ import { pinFrom, readFix, watchFix } from "./locate.js";
 import { HOME, ROUTES, STEPS, TRAIL, YOU, pointAlong } from "./map.js";
 import { PartnerCase, PartnerGate, PartnerHome, PartnerLogin, PartnerQueue, PartnerSignIn } from "./partner.jsx";
 import { PARTNER_CATEGORIES } from "./partner-categories.js";
+import { saveProfilePhoto, useProfilePhoto } from "./profile-photo.js";
 import { Btn, Field, Hdr, Icon, Inp, MapBoard, Note, Screen, Steps } from "./ui.jsx";
 import accidentArt from "./assets/scenes/scene-accident.png";
 import fireArt from "./assets/scenes/scene-fire.png";
@@ -65,7 +66,7 @@ const SCENES = {
   profile1: ["So help\ncan act", profileArt, [["user", "Your name", "If you cannot speak"], ["phone", "Your number", "A desk can call it"], ["globe", "Your language", "How we speak with you"]]],
   profile2: ["People\nand a home", profileArt, [["users", "Next of kin", "Called if you cannot answer"], ["home", "Home pin", "Used when GPS fails"], ["shield", "On your profile", "Until you change it"]]],
   profile3: ["Only in\nan open case", profileArt, [["drop", "Medical card", "Optional"], ["lock", "Sharing stops", "When the case closes"], ["shield", "You choose", "Turn it off any time"]]],
-  safety: ["If you go\nmissing", safetyArt, [["radio", "Last location", "Quietly saved"], ["clock", "We ask you first", "And wait 30 minutes"], ["users", "People you trust", "Only if you do not answer"]]],
+  safety: ["If you go\nmissing", safetyArt, [["radio", "Last location", "Quietly saved"], ["clock", "We ask you first", "You choose how long"], ["users", "People you trust", "Only if you do not answer"]]],
   signin: ["Welcome\nback", joinArt, [["phone", "Phone", "Citizens and students"], ["mail", "University email", "Students"], ["lock", "Your password", "Or a one-time code"]]],
 };
 
@@ -111,7 +112,7 @@ function greetWord() {
 }
 
 function Welcome() {
-  const { go } = useApp();
+  const { go, fix } = useApp();
   return (
     <Screen bare>
       <div className="w">
@@ -123,7 +124,7 @@ function Welcome() {
         </div>
         <div className="w-art">
           <div className="w-card">
-            <MapBoard opts={{ route: ROUTES.mak, pins: ["mak"], you: YOU, amb: pointAlong(ROUTES.mak, 0.45) }} />
+            <MapBoard opts={{ route: ROUTES.mak, pins: ["mak"], you: pinFrom(fix, YOU), amb: pointAlong(ROUTES.mak, 0.45) }} />
           </div>
           <div className="fl a"><Icon n="amb" c="m" />Ambulance, 4 min</div>
           <div className="fl b"><Icon n="shield" c="m" />Hospital connected</div>
@@ -646,7 +647,7 @@ function Profile1() {
 }
 
 function Profile2() {
-  const { user, setUser, setPath, go, showToast } = useApp();
+  const { user, setUser, setPath, go, showToast, fix, askFix } = useApp();
   return (
     <Screen>
       <div className="body">
@@ -668,7 +669,7 @@ function Profile2() {
         <div className="card" style={{ display: "flex", flexDirection: "column", gap: 12 }}>
           <div className="row"><span className="ico gold"><Icon n="home" /></span><div className="grow"><b>Home location</b><div className="fine" style={{ textAlign: "left" }}>Used when GPS fails. Tap the map to move the pin.</div></div></div>
           <MapBoard
-            opts={{ home: 1 }}
+            opts={{ home: 1, you: pinFrom(fix, YOU) }}
             style={{ height: 170, borderRadius: 16 }}
             onTap={(latlng) => {
               setUser({ ...user, home: { text: "Makerere Hill Rd, Kampala", lat: latlng.lat, lng: latlng.lng } });
@@ -677,8 +678,13 @@ function Profile2() {
           />
           <div className="row">
             <span className="grow" style={{ fontWeight: 700, fontSize: 14 }}>{user.home.text}</span>
-            <button type="button" className="link" onClick={() => {
-              setUser({ ...user, home: { text: "Makerere Hill Rd, Kampala", lat: HOME[0], lng: HOME[1] } });
+            <button type="button" className="link" onClick={async () => {
+              const point = await askFix(true);
+              if (!point) {
+                showToast("This browser did not share a location.");
+                return;
+              }
+              setUser({ ...user, home: { text: "Current location", lat: point.lat, lng: point.lng } });
               showToast("Home pin set to your current location");
             }}>Use current location</button>
           </div>
@@ -802,6 +808,7 @@ function SignIn() {
 
 function WelcomeBack() {
   const { user, student, go, openSheet, signOut } = useApp();
+  const photo = useProfilePhoto();
   return (
     <Screen bare>
       <div className="bk">
@@ -810,7 +817,7 @@ function WelcomeBack() {
         </div>
         <div className="bk-card">
           <div className="spacer" />
-          <div className="av">{initials(user.name)}</div>
+          <div className="av">{photo ? <img src={photo} alt="" /> : initials(user.name)}</div>
           <div>
             <div style={{ opacity: 0.85, fontWeight: 600, fontSize: 15 }}>Welcome back,</div>
             <h1 style={{ font: "800 38px/1.1 var(--font)", letterSpacing: "-.025em" }}>{firstName(user.name)}</h1>
@@ -893,6 +900,7 @@ function DeclinedPanel({ where, reason, onOther, onCall }) {
 
 function Home() {
   const { user, student, safety, go, openSheet, setMode, setPlace, setReport, setOtherType, places } = useApp();
+  const photo = useProfilePhoto();
   const on = safety.mode !== "off";
   const hospital = places.mak;
   return (
@@ -900,7 +908,9 @@ function Home() {
       <div className="body desk">
         <div className="page-bar">
         <div className="greet">
-          <span className="av2">{initials(user.name)}</span>
+          <button type="button" className="av2" aria-label="Profile" onClick={() => go("account", null, true)}>
+            {photo ? <img src={photo} alt="" /> : initials(user.name)}
+          </button>
           <div className="grow" style={{ flex: 1, minWidth: 0 }}>
             <h2>{greetWord()}, {firstName(user.name)}</h2>
             <small><Icon n="pin" c="s" />{user.home.text}</small>
@@ -1002,8 +1012,11 @@ function PlaceCard({ id }) {
 }
 
 function Places() {
-  const { filter, setFilter, sel, setSel, setPlace, student, user, openSheet, places, fix } = useApp();
+  const { filter, setFilter, sel, setSel, setPlace, student, user, openSheet, places, fix, askFix } = useApp();
   const ids = placeIds(places, filter, student, user.uni);
+  useEffect(() => {
+    askFix(true);
+  }, []);
   return (
     <Screen tabs bare>
       <MapBoard
@@ -1268,7 +1281,7 @@ function Place() {
 }
 
 function Route() {
-  const { place, back, openSheet, showToast, go, beginCase, moveCase, places } = useApp();
+  const { place, back, openSheet, showToast, go, beginCase, moveCase, places, fix } = useApp();
   const item = places[place];
   const route = ROUTES[place];
   const moveRef = useRef(moveCase);
@@ -1277,7 +1290,7 @@ function Route() {
   const [progress, setProgress] = useState(0);
   const steps = STEPS[place];
   const step = steps[Math.min(steps.length - 1, Math.floor(progress * steps.length))];
-  const you = run ? pointAlong(route, progress) : route[0];
+  const you = run ? pointAlong(route, progress) : pinFrom(fix, route?.[0] || YOU);
   useEffect(() => {
     if (!run) return undefined;
     const id = setInterval(() => {
@@ -1295,7 +1308,7 @@ function Route() {
   }, [progress, run, go]);
   return (
     <Screen bare>
-      <MapBoard className="map mapfull" opts={{ route, pins: [place], you }}>
+      <MapBoard className="map mapfull" opts={{ route, pins: [place], you, look: run ? "route" : "you" }}>
         <button type="button" className="back" onClick={back} aria-label="Back"><Icon n="chevL" /></button>
         <div className="turn">
           <span className="ti"><Icon n="turn" c="l" /></span>
@@ -1354,13 +1367,13 @@ const CASE_STEPS = [
 ];
 
 function Ambulance() {
-  const { place, back, openSheet, kase, go, refreshCase, places, showToast, moveCase, clearCase } = useApp();
+  const { place, back, openSheet, kase, go, refreshCase, places, showToast, moveCase, clearCase, fix } = useApp();
   const refreshRef = useRef(refreshCase);
   const moveRef = useRef(moveCase);
   refreshRef.current = refreshCase;
   moveRef.current = moveCase;
   const item = places[place] || places.mak;
-  const you = kase?.whereLat != null && kase?.whereLng != null ? [Number(kase.whereLat), Number(kase.whereLng)] : YOU;
+  const you = kase?.whereLat != null && kase?.whereLng != null ? [Number(kase.whereLat), Number(kase.whereLng)] : pinFrom(fix, YOU);
   const route = item?.ll ? [you, item.ll] : [...(ROUTES[place] || ROUTES.mak)].reverse();
   const stage = { sent: 0, accepted: 1, on_the_way: 2, arrived: 3, closed: 3 }[kase?.state] ?? 0;
   const crew = stage >= 1;
@@ -1394,7 +1407,7 @@ function Ambulance() {
   const copy = declined ? ["Request declined", `${item.name} could not take it`, "Declined"] : CASE_COPY[stage];
   return (
     <Screen bare>
-      <MapBoard className="map mapfull" opts={{ route, pins: [place], you, amb }}>
+      <MapBoard className="map mapfull" opts={{ route, pins: [place], you, amb, look: "route" }}>
         <button type="button" className="back" onClick={back} aria-label="Back"><Icon n="chevL" /></button>
         <span className="tagc"><Icon n="amb" c="s" />{copy[2]}</span>
       </MapBoard>
@@ -1640,8 +1653,8 @@ function Desk() {
         </div>
         {connected ? <Note icon="phone">The desk calls the number on your profile: +256 {user.phone}.</Note> : <Note tone="red" icon="alert">Nobody can accept this report yet. Call 999 or 112 now. Your case stays saved with your location.</Note>}
         <div className="row" style={{ gap: 10 }}>
-          <Btn tone="red sm" onClick={() => showToast("Calling 999...")}><Icon n="phone" c="m" />Call 999</Btn>
-          <Btn tone="red sm" onClick={() => showToast("Calling 112...")}><Icon n="phone" c="m" />Call 112</Btn>
+          <a className="btn red sm" href="tel:999"><Icon n="phone" c="m" />Call 999</a>
+          <a className="btn red sm" href="tel:112"><Icon n="phone" c="m" />Call 112</a>
         </div>
         <Btn tone="out" onClick={() => go("places", null, true)}><Icon n="map" c="m" />Show route to a nearby place</Btn>
         <Btn tone="out" onClick={() => { setReport((currentReport) => ({ ...currentReport, done: false })); go("report"); }}><Icon n="heart" c="m" />Also need medical help?</Btn>
@@ -1652,10 +1665,17 @@ function Desk() {
   );
 }
 
+const WAIT_MINS = [5, 15, 30, 60];
+
+function waitText(mins) {
+  return mins === 60 ? "1 hour" : `${mins} minutes`;
+}
+
 function SafetyHome() {
-  const { safety, setSafety, user, openSheet, go } = useApp();
+  const { safety, setSafety, keepSafety, user, openSheet, go, fix } = useApp();
   const on = safety.mode !== "off";
   const ago = ["just now", "1 min ago", "2 min ago", "3 min ago"][safety.pings % 4];
+  const wait = WAIT_MINS.includes(Number(safety.wait)) ? Number(safety.wait) : 30;
   const options = [
     ["always", "Always on (recommended)", "Saves a location every 15 minutes and the last place before the phone dies."],
     ["trips", "Only trips and cases", "Shares during Walk me home and open cases."],
@@ -1663,7 +1683,7 @@ function SafetyHome() {
   ];
   const steps = [
     ['Someone says "I cannot reach them"', "A trusted person or the campus desk starts the alert."],
-    ["We ask you first", 'Your phone asks "Are you okay?" and waits 30 minutes.'],
+    ["We ask you first", `Your phone asks "Are you okay?" and waits ${waitText(wait)}.`],
     ["No answer: your last location is shared", "Trail, time and battery go to your next of kin and the security desk."],
     ["Alert ends when you answer", "Sharing stops and the alert is logged."],
   ];
@@ -1685,7 +1705,7 @@ function SafetyHome() {
         </div>
         </div>
         <div className="safe-map">
-        <MapBoard style={{ height: 170, borderRadius: 20, flex: "none" }} opts={{ trail: on ? TRAIL : null, you: on ? TRAIL[TRAIL.length - 1] : null, home: 1 }} />
+        <MapBoard style={{ height: 170, borderRadius: 20, flex: "none" }} opts={{ trail: on ? TRAIL : null, you: pinFrom(fix, YOU), home: 1 }} />
         </div>
         <div className="safe-rest">
         <div className="seg3">
@@ -1693,7 +1713,7 @@ function SafetyHome() {
           <button type="button" className="tile" onClick={() => openSheet("checkin")}><span className="ico gold"><Icon n="clock" /></span>Check-in<small>Ask me "are you okay?"</small></button>
           <button type="button" className="tile" onClick={() => go("alert")}><span className="ico violet"><Icon n="users" /></span>Alert preview<small>What a trusted person sees</small></button>
         </div>
-        <div className="sec"><h3>How much to share</h3></div>
+        <div className="sec"><h3>When to save your location</h3></div>
         {options.map(([id, title, detail]) => (
           <button type="button" key={id} className={`radio${safety.mode === id ? " on" : ""}`} onClick={() => setSafety({ ...safety, mode: id })}>
             <span className="rd">{safety.mode === id ? <Icon n="check" c="s" /> : null}</span>
@@ -1709,7 +1729,22 @@ function SafetyHome() {
           <b style={{ fontSize: 15 }}>How a missing-person alert works</b>
           <div className="tl" style={{ marginTop: 12 }}>
             {steps.map(([title, detail], index) => (
-              <div className="st done" key={title}><i>{index + 1}</i><div><b style={{ color: "var(--ink)" }}>{title}</b><small>{detail}</small></div></div>
+              <div className="st done" key={title}>
+                <i>{index + 1}</i>
+                <div>
+                  <b style={{ color: "var(--ink)" }}>{title}</b>
+                  <small>{detail}</small>
+                  {index === 1 ? (
+                    <div className="chips" style={{ marginTop: 8 }}>
+                      {WAIT_MINS.map((mins) => (
+                        <button type="button" key={mins} className={`chip${wait === mins ? " on" : ""}`} onClick={() => keepSafety({ ...safety, wait: mins })}>
+                          {mins === 60 ? "1 hour" : `${mins} min`}
+                        </button>
+                      ))}
+                    </div>
+                  ) : null}
+                </div>
+              </div>
             ))}
           </div>
         </div>
@@ -1792,10 +1827,10 @@ function Walk() {
 }
 
 function AlertView() {
-  const { back, user, showToast, openSheet } = useApp();
+  const { back, user, showToast, openSheet, fix } = useApp();
   return (
     <Screen bare>
-      <MapBoard className="map" style={{ height: 260, flex: "none" }} opts={{ trail: TRAIL, home: 1 }}>
+      <MapBoard className="map" style={{ height: 260, flex: "none" }} opts={{ trail: TRAIL, you: pinFrom(fix, YOU), home: 1 }}>
         <button type="button" className="back" onClick={back} aria-label="Back"><Icon n="chevL" /></button>
         <span className="tagc"><Icon n="alert" c="s" />Alert open</span>
       </MapBoard>
@@ -1820,7 +1855,7 @@ function AlertView() {
 function Account() {
   const { user, student, safety, theme, setTheme, go, openSheet, signOut } = useApp();
   const photoInput = useRef(null);
-  const [photo, setPhoto] = useState(() => localStorage.getItem("afriresq-photo") || "");
+  const photo = useProfilePhoto();
   const rows = [
     ["drop", "red", "Medical card", `${user.med.blood}, ${user.med.share ? "shared during an open case" : "sharing off"}`, () => openSheet("med")],
     ["users", "gold", "Next of kin", `${user.kin.name}, ${user.kin.rel}`, () => openSheet("kin")],
@@ -1843,9 +1878,7 @@ function Account() {
         canvas.height = size;
         const side = Math.min(image.width, image.height);
         canvas.getContext("2d").drawImage(image, (image.width - side) / 2, (image.height - side) / 2, side, side, 0, 0, size, size);
-        const next = canvas.toDataURL("image/jpeg", 0.82);
-        setPhoto(next);
-        try { localStorage.setItem("afriresq-photo", next); } catch { /* the picture stays for this visit */ }
+        saveProfilePhoto(canvas.toDataURL("image/jpeg", 0.82));
       };
       image.src = String(reader.result || "");
     };
@@ -1856,12 +1889,13 @@ function Account() {
       <div className="body account">
         <div className="page-bar">
         <div className="profile-top">
-          <button type="button" className="profile-photo" onClick={() => photoInput.current?.click()}>
-            <span className="profile-circle">
+          <div className="profile-photo">
+            <button type="button" className="profile-circle" aria-label={photo ? "Change profile photo" : "Add a profile photo"} onClick={() => photoInput.current?.click()}>
               {photo ? <img src={photo} alt="" /> : <Icon n="user" />}
-            </span>
+            </button>
             Profile
-          </button>
+            {photo ? <button type="button" className="link profile-remove" onClick={() => saveProfilePhoto("")}>Remove photo</button> : null}
+          </div>
           <input ref={photoInput} type="file" accept="image/*" hidden onChange={choosePhoto} />
           <div className="scard">
             <span className="pill" style={{ background: "rgba(255,255,255,.2)", color: "#fff" }}>
@@ -2035,8 +2069,8 @@ export function Sheets() {
       <>
         <h3>National emergency lines</h3>
         <p className="sub">AfriResQ sits beside these lines. It does not replace them.</p>
-        <Btn tone="red" onClick={() => { closeSheet(); showToast("Calling 999..."); }}><Icon n="phone" />Call 999</Btn>
-        <Btn tone="red" onClick={() => { closeSheet(); showToast("Calling 112..."); }}><Icon n="phone" />Call 112</Btn>
+        <a className="btn red" href="tel:999"><Icon n="phone" />Call 999</a>
+        <a className="btn red" href="tel:112"><Icon n="phone" />Call 112</a>
       </>
     );
   }

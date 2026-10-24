@@ -106,34 +106,29 @@ const MAPS_KEY = import.meta.env.VITE_GOOGLE_MAPS_API_KEY || "";
 const OSM_TILES = "https://tile.openstreetmap.org/{z}/{x}/{y}.png";
 const OSM_CREDIT = '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>';
 
-// Google refuses the key after the script loads (quota used up, address not allowed).
-// Once that happens, every map on the page uses OpenStreetMap instead.
-let googleDenied = !MAPS_KEY;
-
-let mapsPromise;
-function loadMaps() {
-  window.gm_authFailure = () => {
-    googleDenied = true;
-    window.dispatchEvent(new CustomEvent("afriresq-maps-denied"));
-  };
-  if (window.google?.maps) return Promise.resolve(window.google.maps);
-  if (!MAPS_KEY) return Promise.reject(new Error("missing key"));
-  if (!mapsPromise) {
-    mapsPromise = new Promise((resolve, reject) => {
-      const callback = "__afriresqMaps";
-      window[callback] = () => {
-        if (window.google?.maps) resolve(window.google.maps);
-        else reject(new Error("maps missing"));
-        delete window[callback];
-      };
-      const script = document.createElement("script");
-      script.src = `https://maps.googleapis.com/maps/api/js?key=${encodeURIComponent(MAPS_KEY)}&v=weekly&loading=async&callback=${callback}`;
-      script.async = true;
-      script.onerror = () => reject(new Error("maps failed"));
-      document.head.appendChild(script);
-    });
-  }
-  return mapsPromise;
+function loadMaps(win, doc) {
+  win.gm_authFailure = () => {};
+  if (win.google?.maps?.Map) return Promise.resolve(win.google.maps);
+  return new Promise((resolve, reject) => {
+    const callback = "__afriresqMaps";
+    win[callback] = async () => {
+      try {
+        if (!win.google?.maps) throw new Error("maps missing");
+        await win.google.maps.importLibrary("maps");
+        await win.google.maps.importLibrary("marker");
+        resolve(win.google.maps);
+      } catch (err) {
+        reject(err);
+      } finally {
+        delete win[callback];
+      }
+    };
+    const script = doc.createElement("script");
+    script.src = `https://maps.googleapis.com/maps/api/js?key=${encodeURIComponent(MAPS_KEY)}&v=weekly&loading=async&callback=${callback}`;
+    script.async = true;
+    script.onerror = () => reject(new Error("maps failed"));
+    doc.head.appendChild(script);
+  });
 }
 
 function latLng(point) {
@@ -144,26 +139,29 @@ function latLng(point) {
   return { lat, lng };
 }
 
+// A missing longitude, such as 0, sits in the ocean and pulls the camera across Africa.
+function inUganda(point) {
+  if (!point) return false;
+  return point.lat >= -1.5 && point.lat <= 4.5 && point.lng >= 29.5 && point.lng <= 35.1;
+}
+
+const HERE_ZOOM = 15;
+
 export function MapBoard({ opts = {}, className = "map", style, children, onPin, onTap }) {
-  const { user, student, places } = useApp();
+  const { user, student, places, fix, askFix } = useApp();
+  useEffect(() => {
+    askFix();
+  }, []);
   const node = useRef(null);
   const mapRef = useRef(null);
+  const mapsRef = useRef(null);
   const onPinRef = useRef(onPin);
   const onTapRef = useRef(onTap);
   const [ready, setReady] = useState(false);
   const [failed, setFailed] = useState(false);
-  const [engine, setEngine] = useState(googleDenied ? "osm" : "google");
+  const [engine] = useState(MAPS_KEY ? "google" : "osm");
   onPinRef.current = onPin;
   onTapRef.current = onTap;
-
-  useEffect(() => {
-    const deny = () => {
-      googleDenied = true;
-      setEngine("osm");
-    };
-    window.addEventListener("afriresq-maps-denied", deny);
-    return () => window.removeEventListener("afriresq-maps-denied", deny);
-  }, []);
 
   useEffect(() => {
     if (engine !== "osm") return undefined;
@@ -171,7 +169,7 @@ export function MapBoard({ opts = {}, className = "map", style, children, onPin,
     setReady(false);
     let map;
     try {
-      map = L.map(node.current, { zoomControl: false, attributionControl: true }).setView(YOU, 14);
+      map = L.map(node.current, { zoomControl: false, attributionControl: true }).setView(YOU, 12);
       map.attributionControl.setPrefix(false);
       L.tileLayer(OSM_TILES, { maxZoom: 19, attribution: OSM_CREDIT }).addTo(map);
     } catch {
@@ -188,27 +186,48 @@ export function MapBoard({ opts = {}, className = "map", style, children, onPin,
 
   useEffect(() => {
     if (engine !== "google") return undefined;
+    const frame = node.current;
+    if (!frame) return undefined;
     let cancel = false;
-    loadMaps()
-      .then((maps) => {
-        if (cancel || !node.current || mapRef.current) return;
-        mapRef.current = new maps.Map(node.current, {
-          center: { lat: YOU[0], lng: YOU[1] },
-          zoom: 14,
-          disableDefaultUI: true,
-          clickableIcons: false,
-          gestureHandling: "greedy",
-          backgroundColor: "#dfe8e3",
+    const observer = new ResizeObserver(() => {
+      const map = mapRef.current;
+      const maps = mapsRef.current;
+      if (map && maps) maps.event.trigger(map, "resize");
+    });
+    observer.observe(frame);
+    const start = () => {
+      const doc = frame.contentDocument;
+      const win = frame.contentWindow;
+      if (cancel || !doc || !win || !doc.getElementById("m")) return;
+      loadMaps(win, doc)
+        .then((maps) => {
+          if (cancel) return;
+          const map = new maps.Map(doc.getElementById("m"), {
+            center: { lat: YOU[0], lng: YOU[1] },
+            zoom: 12,
+            disableDefaultUI: true,
+            clickableIcons: true,
+            gestureHandling: "greedy",
+            backgroundColor: "#dfe8e3",
+          });
+          mapRef.current = map;
+          mapsRef.current = maps;
+          maps.event.addListenerOnce(map, "idle", () => {
+            if (!cancel && mapRef.current === map) setReady(true);
+          });
+        })
+        .catch(() => {
+          if (!cancel) setFailed(true);
         });
-        setReady(true);
-      })
-      .catch(() => {
-        if (cancel) return;
-        googleDenied = true;
-        setEngine("osm");
-      });
+    };
+    frame.addEventListener("load", start);
+    frame.src = "/map.html";
     return () => {
       cancel = true;
+      frame.removeEventListener("load", start);
+      observer.disconnect();
+      mapRef.current = null;
+      mapsRef.current = null;
     };
   }, [engine]);
 
@@ -227,8 +246,12 @@ export function MapBoard({ opts = {}, className = "map", style, children, onPin,
     const map = mapRef.current;
     if (!ready || !map || engine !== "osm") return undefined;
     const drawn = [];
-    const points = [];
-    const dot = (point, fill, stroke, radius, interactive = false) => {
+    const frame = [];
+    const here = opts.look !== "route";
+    const keep = (point) => {
+      if (inUganda(point)) frame.push(point);
+    };
+    const dot = (point, fill, stroke, radius, interactive = false, label = "") => {
       if (!point) return null;
       const marker = L.circleMarker(point, {
         radius,
@@ -236,22 +259,27 @@ export function MapBoard({ opts = {}, className = "map", style, children, onPin,
         fillOpacity: 1,
         color: stroke,
         weight: 3,
-        interactive,
+        interactive: interactive || Boolean(label),
       }).addTo(map);
+      if (label) {
+        const line = document.createElement("b");
+        line.textContent = label;
+        marker.bindPopup(line);
+      }
       drawn.push(marker);
-      points.push(point);
+      keep(point);
       return marker;
     };
 
     if (opts.route?.length) {
       const path = opts.route.map(latLng).filter(Boolean);
       drawn.push(L.polyline(path, { color: "#0B8F4D", weight: 5, opacity: 0.9, interactive: false }).addTo(map));
-      points.push(...path);
+      path.forEach(keep);
     }
     if (opts.trail?.length) {
       const path = opts.trail.map(latLng).filter(Boolean);
       drawn.push(L.polyline(path, { color: "#0B8F4D", weight: 4, opacity: 0.9, dashArray: "6 6", interactive: false }).addTo(map));
-      points.push(...path);
+      path.forEach(keep);
     }
     (opts.pins || []).forEach((id) => {
       const place = places[id];
@@ -263,17 +291,20 @@ export function MapBoard({ opts = {}, className = "map", style, children, onPin,
         listed ? "#0B8F4D" : "#ffffff",
         opts.sel === id ? 11 : 8,
         true,
+        place?.name || "",
       );
       marker?.on("click", () => onPinRef.current?.(id));
     });
-    dot(latLng(opts.you), "#0B8F4D", "#ffffff", 8);
+    dot(latLng(opts.you), "#0B8F4D", "#ffffff", 8, false, "You are here");
     if (opts.home) dot(latLng(homePoint(user)), "#E39A0B", "#ffffff", 8);
     dot(latLng(opts.amb), "#D93636", "#ffffff", 9);
 
     const timer = setTimeout(() => {
       map.invalidateSize();
-      if (points.length === 1) map.setView(points[0], 16);
-      else if (points.length > 1) map.fitBounds(L.latLngBounds(points), { padding: [36, 36] });
+      const you = latLng(opts.you);
+      if (here && you) map.flyTo(you, HERE_ZOOM, { duration: 0.8 });
+      else if (!here && frame.length === 1) map.setView(frame[0], HERE_ZOOM);
+      else if (!here && frame.length > 1) map.fitBounds(L.latLngBounds(frame), { padding: [36, 36], maxZoom: HERE_ZOOM });
     }, 60);
     const tap = (event) => onTapRef.current?.({ lat: event.latlng.lat, lng: event.latlng.lng });
     if (onTapRef.current) map.on("click", tap);
@@ -286,22 +317,25 @@ export function MapBoard({ opts = {}, className = "map", style, children, onPin,
 
   useEffect(() => {
     const map = mapRef.current;
-    const maps = window.google?.maps;
+    const maps = mapsRef.current;
     if (!ready || !map || !maps || engine !== "google") return undefined;
+    const owner = map.getDiv()?.ownerDocument || document;
     const drawn = [];
     const bounds = new maps.LatLngBounds();
     let count = 0;
+    const here = opts.look !== "route";
+    const info = new maps.InfoWindow();
     const extend = (point) => {
-      if (!point) return;
+      if (!inUganda(point)) return;
       bounds.extend(point);
       count += 1;
     };
-    const circle = (point, fill, stroke, scale) => {
+    const circle = (point, fill, stroke, scale, label = "") => {
       if (!point) return;
-      drawn.push(new maps.Marker({
+      const marker = new maps.Marker({
         map,
         position: point,
-        clickable: false,
+        clickable: Boolean(label),
         icon: {
           path: maps.SymbolPath.CIRCLE,
           scale,
@@ -310,7 +344,16 @@ export function MapBoard({ opts = {}, className = "map", style, children, onPin,
           strokeColor: stroke,
           strokeWeight: 3,
         },
-      }));
+      });
+      if (label) {
+        marker.addListener("click", () => {
+          const line = owner.createElement("b");
+          line.textContent = label;
+          info.setContent(line);
+          info.open({ map, anchor: marker });
+        });
+      }
+      drawn.push(marker);
       extend(point);
     };
 
@@ -350,20 +393,33 @@ export function MapBoard({ opts = {}, className = "map", style, children, onPin,
           strokeWeight: 3,
         },
       });
-      marker.addListener("click", () => onPinRef.current?.(id));
+      marker.addListener("click", () => {
+        onPinRef.current?.(id);
+        if (!place?.name) return;
+        const line = owner.createElement("b");
+        line.textContent = place.name;
+        info.setContent(line);
+        info.open({ map, anchor: marker });
+      });
       drawn.push(marker);
       extend(point);
     });
-    circle(latLng(opts.you), "#0B8F4D", "#ffffff", 8);
+    circle(latLng(opts.you), "#0B8F4D", "#ffffff", 8, "You are here");
     if (opts.home) circle(latLng(homePoint(user)), "#E39A0B", "#ffffff", 8);
     circle(latLng(opts.amb), "#D93636", "#ffffff", 9);
 
+    let zoomLater = null;
     const timer = setTimeout(() => {
-      maps.event.trigger(map, "resize");
-      if (count === 1) {
-        map.setCenter(bounds.getCenter());
-        map.setZoom(16);
-      } else if (count > 1) {
+      const you = latLng(opts.you);
+      if (here && you) {
+        map.panTo(you);
+        zoomLater = maps.event.addListenerOnce(map, "idle", () => {
+          if (mapRef.current === map) map.setZoom(HERE_ZOOM);
+        });
+      } else if (!here && count === 1) {
+        map.panTo(bounds.getCenter());
+        map.setZoom(HERE_ZOOM);
+      } else if (!here && count > 1) {
         map.fitBounds(bounds, 36);
       }
     }, 60);
@@ -375,14 +431,16 @@ export function MapBoard({ opts = {}, className = "map", style, children, onPin,
       : null;
     return () => {
       clearTimeout(timer);
+      if (zoomLater) maps.event.removeListener(zoomLater);
       if (tap) maps.event.removeListener(tap);
+      info.close();
       drawn.forEach((item) => item.setMap(null));
     };
   }, [ready, engine, spec, places]);
 
   return (
     <div className={className} style={style}>
-      <div key={engine} ref={node} className="gmap" />
+      {engine === "google" ? <iframe key="google" ref={node} className="gmap" title="Map" /> : <div key="osm" ref={node} className="gmap" />}
       {failed ? <p className="map-fallback">The map cannot load right now. Check the internet connection. Everything else still works.</p> : null}
       {children}
     </div>

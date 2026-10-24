@@ -34,5 +34,6 @@ function fromPosition(pos) {
 
 export function pinFrom(fix, fallback) {
   if (fix?.status === "ready") return [fix.lat, fix.lng];
+  if (!fix || fix.status === "wait") return null;
   return fallback;
 }

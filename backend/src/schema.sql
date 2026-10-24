@@ -186,6 +186,7 @@ alter table people add column if not exists blocked_reason text not null default
 
 -- A password set at sign-up, so a member can sign in again without a code. Only the hash is stored.
 alter table people add column if not exists password_hash text not null default '';
+alter table people add column if not exists safety_wait_mins integer not null default 30;
 alter table people add column if not exists failed_logins integer not null default 0;
 alter table people add column if not exists locked_until timestamptz;
 

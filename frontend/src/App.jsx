@@ -75,7 +75,7 @@ export default function App() {
   const [codeFor, setCodeFor] = useState("");
   const [signinTab, setSigninTab] = useState(lastLogin?.tab || "phone");
   const [newPassword, setNewPassword] = useState({ value: "", again: "" });
-  const [safety, setSafety] = useState(saved?.safety || { mode: "always", kin: true, pings: 3 });
+  const [safety, setSafety] = useState(saved?.safety || { mode: "always", kin: true, pings: 3, wait: 30 });
   const [report, setReport] = useState({
     what: "Injury or fall",
     awake: "Yes",
@@ -290,8 +290,8 @@ export default function App() {
 
   const student = user.type === "student";
 
-  async function askFix() {
-    if (fixRef.current?.status === "ready") return fixRef.current;
+  async function askFix(force) {
+    if (!force && fixRef.current?.status === "ready") return fixRef.current;
     if (askPromise.current) return askPromise.current;
     const pending = { status: "wait" };
     fixRef.current = pending;
@@ -363,6 +363,16 @@ export default function App() {
     setNewPassword,
     safety,
     setSafety,
+    async keepSafety(next) {
+      setSafety(next);
+      persist(user, profileDone, next);
+      if (!authToken || !profileDone) return;
+      try {
+        await savePerson(user, profileDone, next, authToken);
+      } catch (err) {
+        showToast(err.message || "That choice could not be saved.");
+      }
+    },
     report,
     setReport,
     mode,
