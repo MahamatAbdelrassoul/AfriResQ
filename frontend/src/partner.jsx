@@ -1171,6 +1171,142 @@ function PartnerAccount({ partner, onLeave }) {
   );
 }
 
+function messageWhen(iso) {
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return "";
+  return date.toLocaleString(undefined, { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" });
+}
+
+function PartnerAnnouncements({ onSignedOut }) {
+  const token = readPartnerSession()?.token || "";
+  const [data, setData] = useState(null);
+  const [text, setText] = useState("");
+  const [email, setEmail] = useState("");
+  const [error, setError] = useState("");
+  const [busy, setBusy] = useState("");
+
+  async function load() {
+    const res = await fetch("/api/announcements/desk", { headers: { Authorization: `Bearer ${token}` } });
+    const body = await res.json().catch(() => ({}));
+    if (res.status === 401) throw new PartnerSignedOut("Sign in with the partner code first.");
+    if (!res.ok) throw new Error(body.error || "The messages could not be loaded.");
+    setData(body);
+  }
+
+  useEffect(() => {
+    let stop = false;
+    load().catch((err) => { if (stop) return; if (err instanceof PartnerSignedOut) onSignedOut(); else setError(err.message); });
+    return () => { stop = true; };
+  }, []);
+
+  async function send(event) {
+    event.preventDefault();
+    const body = text.trim();
+    if (!body || busy) return;
+    setBusy("send");
+    setError("");
+    try {
+      const res = await fetch("/api/announcements/desk", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ body }),
+      });
+      const next = await res.json().catch(() => ({}));
+      if (res.status === 401) throw new PartnerSignedOut("Sign in with the partner code first.");
+      if (!res.ok) throw new Error(next.error || "The message could not be sent.");
+      setText("");
+      await load();
+    } catch (err) {
+      if (err instanceof PartnerSignedOut) onSignedOut();
+      else setError(err.message);
+    } finally {
+      setBusy("");
+    }
+  }
+
+  async function addAdmin(event) {
+    event.preventDefault();
+    const value = email.trim();
+    if (!value || busy) return;
+    setBusy("admin");
+    setError("");
+    try {
+      const res = await fetch("/api/announcements/desk/admins", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ email: value }),
+      });
+      const next = await res.json().catch(() => ({}));
+      if (res.status === 401) throw new PartnerSignedOut("Sign in with the partner code first.");
+      if (!res.ok) throw new Error(next.error || "That person could not be added.");
+      setEmail("");
+      await load();
+    } catch (err) {
+      if (err instanceof PartnerSignedOut) onSignedOut();
+      else setError(err.message);
+    } finally {
+      setBusy("");
+    }
+  }
+
+  async function removeAdmin(personId) {
+    setBusy("remove");
+    setError("");
+    try {
+      const res = await fetch("/api/announcements/desk/admins", {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ personId }),
+      });
+      if (res.status === 401) throw new PartnerSignedOut("Sign in with the partner code first.");
+      if (!res.ok) throw new Error("That admin could not be removed.");
+      await load();
+    } catch (err) {
+      if (err instanceof PartnerSignedOut) onSignedOut();
+      else setError(err.message);
+    } finally {
+      setBusy("");
+    }
+  }
+
+  if (!data) return error ? <Note tone="red" icon="alert">{error}</Note> : <div className="pd-card pd-loading">Opening the group…</div>;
+  if (!data.group) {
+    return <div className="pd-card"><b>No announcement group yet</b><p className="pd-fine">This university did not create one when it joined. Creating a group from here comes later.</p></div>;
+  }
+  return (
+    <div className="pd-card announce-desk">
+      {error ? <Note tone="red" icon="alert">{error}</Note> : null}
+      <b>{data.group.name}</b>
+      <p className="pd-fine">Students of this university can read every message. Only admins can send.</p>
+      <div className="announce-log desk">
+        {data.messages.length ? data.messages.map((message) => (
+          <div className="announce-msg" key={message.id}>
+            <b>{message.senderName}</b>
+            <p>{message.body}</p>
+            <small>{messageWhen(message.at)}</small>
+          </div>
+        )) : <p className="announce-empty">No message yet.</p>}
+      </div>
+      <form className="announce-send" onSubmit={send}>
+        <textarea value={text} rows={3} placeholder="Write a message for every student" onChange={(event) => setText(event.target.value)} />
+        <button type="submit" className="btn pri" disabled={Boolean(busy) || !text.trim()}>{busy === "send" ? "Sending…" : "Send"}</button>
+      </form>
+      <form className="announce-admin" onSubmit={addAdmin}>
+        <b>Admins</b>
+        <p className="pd-fine">The university can already send. Add a student of this university if they should send too.</p>
+        {(data.admins || []).map((admin) => (
+          <div className="announce-admin-row" key={admin.id}>
+            <span><b>{admin.name}</b><small>{admin.email}</small></span>
+            <button type="button" className="link" onClick={() => removeAdmin(admin.id)}>Remove</button>
+          </div>
+        ))}
+        <Inp icon="mail" type="email" value={email} placeholder="name@students.example.ac.ug" onChange={setEmail} />
+        <button type="submit" className="btn out" disabled={Boolean(busy) || !email.trim()}>{busy === "admin" ? "Adding…" : "Add admin"}</button>
+      </form>
+    </div>
+  );
+}
+
 function PartnerHome() {
   const { go, showToast } = useApp();
   const [partner, setPartner] = useState(null);
@@ -1275,7 +1411,10 @@ function PartnerHome() {
             ) : null}
 
             <nav className="pd-nav" aria-label="Dashboard sections">
-              {SECTIONS.map(([id, label, icon]) => (
+              {(partner?.applicantKind === "university"
+                ? [["cases", "Cases", "list"], ["announcements", "Announcements", "chat"], ["profile", "Profile", "edit"], ["account", "Account", "lock"]]
+                : SECTIONS
+              ).map(([id, label, icon]) => (
                 <button type="button" key={id} className={tab === id ? "on" : ""} aria-current={tab === id ? "page" : undefined} onClick={() => setTab(id)}>
                   <Icon n={icon} />
                   <span>{label}</span>
@@ -1290,6 +1429,7 @@ function PartnerHome() {
             {partner ? (
               <>
                 {tab === "cases" ? <PartnerCases partner={partner} onSignedOut={signedOut} /> : null}
+                {tab === "announcements" ? <PartnerAnnouncements onSignedOut={signedOut} /> : null}
                 {tab === "profile" ? <PartnerProfile key={partner.id} partner={partner} onSaved={keep} onSignedOut={signedOut} /> : null}
                 {tab === "account" ? <PartnerAccount partner={partner} onLeave={() => go("welcome", null, true)} /> : null}
               </>

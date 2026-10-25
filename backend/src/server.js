@@ -8,8 +8,10 @@ import { adminRouter, seedAdmin } from "./admin.js";
 import { authRouter } from "./auth.js";
 import { casesRouter } from "./cases.js";
 import { deskRouter, seedDeskCodes } from "./desks.js";
-import { peopleRouter } from "./people.js";
+import { forgetOldPlaces, peopleRouter } from "./people.js";
 import { partnerRouter } from "./partners.js";
+import { announcementRouter } from "./announcements.js";
+import { safetyRouter } from "./safety.js";
 import { placesRouter } from "./places.js";
 
 const envPath = join(dirname(fileURLToPath(import.meta.url)), "..", ".env");
@@ -43,9 +45,11 @@ app.use(express.json());
 
 app.use("/api/auth", authRouter(pool));
 app.use("/api/people", peopleRouter(pool));
+app.use("/api/safety", safetyRouter(pool));
 app.use("/api/cases", casesRouter(pool));
 app.use("/api/places", placesRouter(pool));
 app.use("/api/partners", partnerRouter(pool));
+app.use("/api/announcements", announcementRouter(pool));
 app.use("/api/desk", deskRouter(pool));
 app.use("/api/admin", adminRouter(pool));
 
@@ -69,6 +73,10 @@ async function start() {
     await pool.query(schema);
     await seedDeskCodes(pool);
     await seedAdmin(pool);
+    await forgetOldPlaces(pool);
+    setInterval(() => {
+      forgetOldPlaces(pool).catch((err) => console.error("Old places were not cleared:", err.message));
+    }, 60 * 60 * 1000);
     console.log("Database tables are ready");
   } catch (err) {
     console.error("Database tables were not created:", err.message);

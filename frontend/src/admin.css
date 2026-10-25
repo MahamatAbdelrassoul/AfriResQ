@@ -61,7 +61,7 @@ body.admin * {
 .team-mark b {
   display: block;
   font-size: 22px;
-  font-weight: 800;
+  font-weight:600;
   letter-spacing: -0.03em;
 }
 
@@ -73,7 +73,7 @@ body.admin * {
 
 .team-lead h1 {
   margin: 8px 0 0;
-  font: 800 40px/1.05 var(--font);
+  font:600 40px/1.05 var(--font);
   letter-spacing: -0.04em;
 }
 
@@ -101,7 +101,7 @@ body.admin * {
 .team-card h2,
 .team-col h2 {
   margin: 0 0 12px;
-  font: 800 18px/1.2 var(--font);
+  font:600 18px/1.2 var(--font);
   letter-spacing: -0.02em;
 }
 
@@ -112,7 +112,7 @@ body.admin * {
 }
 
 .team-desk .grow { flex: 1; min-width: 0; }
-.team-desk b { display: block; font-size: 17px; font-weight: 800; }
+.team-desk b { display: block; font-size: 17px; font-weight:600; }
 .team-desk small { display: block; margin-top: 3px; color: var(--ink2); font-weight: 600; }
 
 .team-code {
@@ -135,7 +135,7 @@ body.admin * {
 }
 
 .team-case .t { flex: 1; min-width: 0; }
-.team-case b { display: block; font-size: 16px; font-weight: 800; }
+.team-case b { display: block; font-size: 16px; font-weight:600; }
 .team-case b span { font-weight: 650; color: var(--ink2); }
 .team-case small { display: block; margin-top: 3px; color: var(--ink2); font-size: 13px; font-weight: 600; }
 
@@ -154,7 +154,7 @@ body.admin * {
 }
 
 .team-gate h1 {
-  font: 800 36px/1.08 var(--font);
+  font:600 36px/1.08 var(--font);
   letter-spacing: -0.04em;
 }
 
@@ -188,7 +188,7 @@ body.admin * {
   border: 1.5px solid var(--line);
   background: var(--surface);
   color: var(--ink2);
-  font-weight: 700;
+  font-weight:600;
   font-size: 14px;
 }
 
@@ -210,12 +210,12 @@ body.admin * {
 }
 
 .team-panel { display: flex; flex-direction: column; gap: 16px; margin-top: 18px; }
-.team-h2 { margin: 10px 0 0; font: 800 18px/1.2 var(--font); letter-spacing: -0.02em; }
+.team-h2 { margin: 10px 0 0; font:600 18px/1.2 var(--font); letter-spacing: -0.02em; }
 .team-muted { display: block; color: var(--ink2); font-weight: 600; }
 .team-hint { margin: 0; font-size: 13px; }
 .team-red { color: var(--red) !important; }
 .team-card a,
-.team-case-body a { color: var(--green-d); font-weight: 700; }
+.team-case-body a { color: var(--green-d); font-weight:600; }
 
 .team-tiles {
   display: grid;
@@ -236,8 +236,8 @@ body.admin * {
   color: var(--ink);
 }
 
-.team-tile small { color: var(--ink2); font-weight: 700; font-size: 13px; }
-.team-tile b { font: 800 34px/1 var(--font); letter-spacing: -0.03em; }
+.team-tile small { color: var(--ink2); font-weight:600; font-size: 13px; }
+.team-tile b { font:600 34px/1 var(--font); letter-spacing: -0.03em; }
 .team-tile span { color: var(--ink2); font-size: 13px; font-weight: 600; }
 .team-tile.warn { border-color: var(--gold); background: var(--gold-s); }
 .team-tile.alarm { border-color: var(--red); background: var(--red-s); }
@@ -257,7 +257,7 @@ body.admin * {
   border-radius: 12px;
   border: 1.5px solid var(--line);
   background: var(--surface);
-  font-weight: 700;
+  font-weight:600;
   font-size: 14px;
   color: var(--ink2);
 }
@@ -281,7 +281,7 @@ body.admin * {
 .team-form .team-form-row { margin-top: 0; }
 .team-form-row .field,
 .team-form .field { margin: 0; gap: 6px; }
-.team-label { font-size: 13px; font-weight: 700; color: var(--ink2); }
+.team-label { font-size: 13px; font-weight:600; color: var(--ink2); }
 
 .team-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; }
 .team-actions .btn { width: auto; padding: 0 16px; gap: 6px; }
@@ -311,7 +311,7 @@ body.admin * {
 .team-log-row b { display: block; font-size: 14px; }
 .team-log-row b span { color: var(--ink2); font-weight: 650; }
 .team-log-row small { display: block; color: var(--ink2); font-size: 13px; font-weight: 600; }
-.team-log-row time { flex: none; color: var(--ink2); font-size: 12px; font-weight: 700; }
+.team-log-row time { flex: none; color: var(--ink2); font-size: 12px; font-weight:600; }
 
 @media (max-width: 520px) {
   .team-code { flex-wrap: wrap; }

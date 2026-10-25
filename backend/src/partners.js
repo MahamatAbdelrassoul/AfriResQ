@@ -293,37 +293,54 @@ export function partnerRouter(pool) {
       });
       return;
     }
+    const announcementName = university ? clean(body.announcementName, 80) : "";
     try {
-      const saved = await pool.query(
-        `insert into partner_applications (
-           organisation, primary_category, extra_categories, phone, email, address, districts,
-           services, hours, emergency_ready, licence, representative_name, representative_phone, representative_email,
-           base_lat, base_lng, applicant_kind, city, student_domain
-         ) values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19)
-         returning id, status`,
-        [
-          organisation,
-          primary,
-          extras,
-          phone,
-          email,
-          address,
-          districts,
-          services,
-          hours,
-          Boolean(body.emergencyReady),
-          licence,
-          representativeName,
-          representativePhone,
-          representativeEmail,
-          hasBase ? baseLat : null,
-          hasBase ? baseLng : null,
-          university ? "university" : "organisation",
-          university ? city : "",
-          university && domainOk ? studentDomain : "",
-        ],
-      );
-      res.status(201).json({ id: saved.rows[0].id, status: saved.rows[0].status });
+      const client = await pool.connect();
+      try {
+        await client.query("begin");
+        const saved = await client.query(
+          `insert into partner_applications (
+             organisation, primary_category, extra_categories, phone, email, address, districts,
+             services, hours, emergency_ready, licence, representative_name, representative_phone, representative_email,
+             base_lat, base_lng, applicant_kind, city, student_domain
+           ) values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19)
+           returning id, status`,
+          [
+            organisation,
+            primary,
+            extras,
+            phone,
+            email,
+            address,
+            districts,
+            services,
+            hours,
+            Boolean(body.emergencyReady),
+            licence,
+            representativeName,
+            representativePhone,
+            representativeEmail,
+            hasBase ? baseLat : null,
+            hasBase ? baseLng : null,
+            university ? "university" : "organisation",
+            university ? city : "",
+            university && domainOk ? studentDomain : "",
+          ],
+        );
+        if (announcementName) {
+          await client.query(
+            "insert into announcement_groups (partner_id, name) values ($1, $2)",
+            [saved.rows[0].id, announcementName],
+          );
+        }
+        await client.query("commit");
+        res.status(201).json({ id: saved.rows[0].id, status: saved.rows[0].status });
+      } catch (err) {
+        await client.query("rollback");
+        throw err;
+      } finally {
+        client.release();
+      }
     } catch {
       res.status(503).json({ error: "The database is not available." });
     }

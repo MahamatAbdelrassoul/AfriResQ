@@ -1,11 +1,13 @@
 import { useEffect, useRef, useState } from "react";
 import { useApp } from "./app-state.js";
+import { answerSafetyAlert, cancelCheckin, endTrip, planWalk, safetyMine, saveLastPlace, startCheckin, startSafetyAlert, startTrip } from "./account-api.js";
 import { pinFrom, readFix, watchFix } from "./locate.js";
-import { HOME, ROUTES, STEPS, TRAIL, YOU, pointAlong } from "./map.js";
+import { HOME, ROUTES, STEPS, YOU, pointAlong } from "./map.js";
 import { PartnerCase, PartnerGate, PartnerHome, PartnerLogin, PartnerQueue, PartnerSignIn } from "./partner.jsx";
 import { PARTNER_CATEGORIES } from "./partner-categories.js";
 import { saveProfilePhoto, useProfilePhoto } from "./profile-photo.js";
 import { Btn, Field, Hdr, Icon, Inp, MapBoard, Note, Screen, Steps } from "./ui.jsx";
+import { notifyDecided, notifyEnabled, notifyPermission, notifySupported, registerNotifier, setNotifyChoice, showNotice } from "./notify.js";
 import accidentArt from "./assets/scenes/scene-accident.png";
 import fireArt from "./assets/scenes/scene-fire.png";
 import securityArt from "./assets/scenes/scene-security.png";
@@ -70,7 +72,7 @@ const SCENES = {
   signin: ["Welcome\nback", joinArt, [["phone", "Phone", "Citizens and students"], ["mail", "University email", "Students"], ["lock", "Your password", "Or a one-time code"]]],
 };
 
-function PageArt({ title, sub, sos = false, kind, line, points }) {
+function PageArt({ title, sub, sos = false, kind, line, points, art }) {
   const scene = SCENES[kind];
   const bits = points || scene[2];
   return (
@@ -79,9 +81,9 @@ function PageArt({ title, sub, sos = false, kind, line, points }) {
       <div className="lede">
         <Hdr title={title} sub={sub} sos={sos} />
         <aside className="scene">
-        <div className="scene-art">
-          <img src={scene[1]} alt="" />
-          <p className="scene-line">{line || scene[0]}</p>
+        <div className={`scene-art${art ? " is-map" : ""}`}>
+          {art || <img src={scene[1]} alt="" />}
+          {art ? null : <p className="scene-line">{line || scene[0]}</p>}
         </div>
         <div className="scene-points">
           {bits.map(([icon, label, detail]) => (
@@ -262,6 +264,7 @@ function PartnerJoin() {
     representativeEmail: "",
     baseLat: "",
     baseLng: "",
+    announcementName: "",
   });
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
@@ -346,6 +349,7 @@ function PartnerJoin() {
           <Note icon="lock">AfriResQ has the request. This {university ? "university" : "organisation"} will not receive a case until the team confirms it. Call 999 or 112 if someone needs help now.</Note>
           <Note icon="pin">Once confirmed, your {university ? "university" : "organisation"} gets its own place on the AfriResQ map and receives cases there.</Note>
           <Note icon="mail">Once confirmed, a sign-in code goes to {form.email || "the official email"} and by SMS to {form.representativeName || "the representative"}. Use it under Partner sign-in on the welcome screen.</Note>
+          {university && form.announcementName ? <Note icon="users">The group “{form.announcementName}” opens for students once AfriResQ confirms this university.</Note> : null}
         </div>
       </Screen>
     );
@@ -370,6 +374,10 @@ function PartnerJoin() {
                   <Inp icon="mail" value={form.studentDomain} placeholder="students.kyu.ac.ug" onChange={set("studentDomain")} />
                 </Field>
                 <Note>A student will later join with name@{form.studentDomain || "students.kyu.ac.ug"}.</Note>
+                <Field label="Announcement group">
+                  <Inp value={form.announcementName} placeholder="Kyambogo announcements" onChange={set("announcementName")} />
+                </Field>
+                <Note>Leave this empty to create the group later. Students with this email see every message. Only admins can send.</Note>
               </>
             ) : null}
             <Field label="Official telephone">
@@ -727,7 +735,7 @@ function Profile2() {
             }}
           />
           <div className="row">
-            <span className="grow" style={{ fontWeight: 700, fontSize: 14 }}>{user.home.text}</span>
+            <span className="grow" style={{ fontWeight: 600, fontSize: 14 }}>{user.home.text}</span>
             <button type="button" className="link" onClick={async () => {
               const point = await askFix(true);
               if (!point) {
@@ -785,7 +793,7 @@ function Profile3() {
 function Consent() {
   const { safety, setSafety, user, finishSetup } = useApp();
   const options = [
-    ["always", "Always on (recommended)", "Saves your location every 15 minutes, and the last place before your phone dies. Light on battery."],
+    ["always", "Always on (recommended)", "Saves a place about every 5 minutes while AfriResQ is open."],
     ["trips", "Only trips and cases", 'Shares only during "Walk me home" trips and open emergency cases.'],
     ["off", "Off", "No location is saved. Cases still use live location while they are open."],
   ];
@@ -879,7 +887,7 @@ function WelcomeBack() {
           <Btn tone="white" onClick={() => go("home", null, true)}><Icon n="finger" />Unlock with fingerprint</Btn>
           <Btn tone="ghost" onClick={() => go("signin")}>Sign in with password or code</Btn>
           <button type="button" className="link" style={{ color: "#fff", opacity: 0.85 }} onClick={signOut}>Not {firstName(user.name)}? Use another account</button>
-          <button type="button" className="w-foot" style={{ color: "#fff", justifyContent: "center", display: "flex", gap: 6, alignItems: "center", fontWeight: 700, fontSize: 13, margin: "0 auto" }} onClick={() => openSheet("lines")}>
+          <button type="button" className="w-foot" style={{ color: "#fff", justifyContent: "center", display: "flex", gap: 6, alignItems: "center", fontWeight: 600, fontSize: 13, margin: "0 auto" }} onClick={() => openSheet("lines")}>
             <Icon n="phone" c="s" />Call 999 or 112
           </button>
         </div>
@@ -890,9 +898,9 @@ function WelcomeBack() {
 
 // What the person sees about a request they sent, in their own words.
 const REQUEST_STATUS = {
-  sent: ["Waiting for a reply", "Sent. The team is being alerted.", "warn"],
+  sent: ["Waiting for a reply", "Your request is sent. The team is being told.", "warn"],
   accepted: ["Accepted", "A team has taken your request.", "ok"],
-  on_the_way: ["On the way", "Help is moving to you.", "ok"],
+  on_the_way: ["On the way", "Help is coming to you.", "ok"],
   arrived: ["Arrived", "Help is with you.", "ok"],
   declined: ["Declined", "They could not take it. Choose other help.", "bad"],
 };
@@ -918,12 +926,12 @@ function RequestStatusCard() {
       <button type="button" className="req-status-main" onClick={open}>
         <span className={`bd ${status[2]}`}>{status[0]}</span>
         <b>{kase.id} · {kase.what}</b>
-        <small>{kase.state === "declined" ? `${where}: ${kase.declineReason || "could not take it"}` : `${where} · ${status[1]}`}</small>
+        <small>{kase.state === "declined" ? (kase.declineReason ? `${where}. ${kase.declineReason}` : `${where} could not take it.`) : `${where}. ${status[1]}`}</small>
       </button>
       {kase.state === "declined" ? (
         <div className="req-status-actions">
           <button type="button" className="btn pri sm" onClick={() => { clearCase(); go("help"); }}>Choose other help</button>
-          <button type="button" className="btn out sm" onClick={() => clearCase()}>Dismiss</button>
+          <button type="button" className="btn out sm" onClick={() => clearCase()}>Clear this</button>
         </div>
       ) : (
         <Icon n="chevR" c="chev" />
@@ -972,14 +980,15 @@ function Home() {
         </div>
         <div className="desk-grid">
         <RequestStatusCard />
+        <CheckInDue />
         <button type="button" className={`sn${on ? "" : " off"}`} onClick={() => go("safetyHome", null, true)}>
-          <i />Safety Net {on ? "on, location saved" : "off"}
+          <i />{on ? "Safety Net is on. A place is saved while AfriResQ is open." : "Safety Net is off. Nothing is saved."}
         </button>
         <div className="desk-hero">
         <button type="button" className="hero" onClick={() => { setReport((current) => ({ ...current, done: false })); go("report"); }}>
           <span className="tag"><Icon n="heart" c="s" />Medical emergency</span>
           <h2>Need medical help?</h2>
-          <p>{student ? "Four quick questions. Makerere University Hospital can send an ambulance." : "Four quick questions. We find the nearest hospital and an ambulance."}</p>
+          <p>{student ? `Answer four questions. ${hospital.name} can send an ambulance.` : "Answer four questions. We find the nearest hospital and an ambulance."}</p>
           <Icon n="amb" c="big" />
           <span className="go">Get medical help <Icon n="chevR" c="m" /></span>
         </button>
@@ -991,7 +1000,7 @@ function Home() {
             <span className="t">
               <small>Your university hospital</small>
               <b>{hospital.name}</b>
-              <small><span className="dotg" />{hospital.dist} km away, ambulance can be sent</small>
+              <small><span className="dotg" />{hospital.dist} km from you. An ambulance can be sent.</small>
             </span>
             <Icon n="chevR" c="chev" />
           </button>
@@ -999,9 +1008,9 @@ function Home() {
           <button type="button" className="pcard" onClick={() => go("places", null, true)}>
             <span className="ico gold"><Icon n="home" /></span>
             <span className="t">
-              <small>Saved home location</small>
+              <small>Your saved home</small>
               <b>{user.home.text}</b>
-              <small>Find nearest help from here</small>
+              <small>Find the nearest help from here.</small>
             </span>
             <Icon n="chevR" c="chev" />
           </button>
@@ -1019,7 +1028,7 @@ function Home() {
         </div>
         <button type="button" className="pcard lap-quiet" onClick={() => openSheet("lines")}>
           <span className="ico red"><Icon n="phone" /></span>
-          <span className="t"><b style={{ margin: 0 }}>Call 999 or 112</b><small>National emergency lines, one tap</small></span>
+          <span className="t"><b style={{ margin: 0 }}>Call 999 or 112</b><small>The national lines. Phone them if you can.</small></span>
           <Icon n="chevR" c="chev" />
         </button>
         </div>
@@ -1715,26 +1724,517 @@ function Desk() {
   );
 }
 
-const WAIT_MINS = [5, 15, 30, 60];
+function placeAgo(iso, now = Date.now()) {
+  const mins = Math.max(0, Math.round((now - new Date(iso).getTime()) / 60000));
+  if (mins < 1) return "just now";
+  if (mins < 60) return `${mins} min ago`;
+  const hours = Math.round(mins / 60);
+  if (hours < 24) return hours === 1 ? "1 hour ago" : `${hours} hours ago`;
+  const days = Math.round(hours / 24);
+  return days === 1 ? "1 day ago" : `${days} days ago`;
+}
 
-function waitText(mins) {
-  return mins === 60 ? "1 hour" : `${mins} minutes`;
+function callHref(phone) {
+  const digits = String(phone || "").replace(/\D/g, "");
+  const national = digits.startsWith("256") ? digits.slice(3) : digits.replace(/^0/, "");
+  return /^7\d{8}$/.test(national) ? `tel:+256${national}` : "";
+}
+
+const emptyMine = { watching: [], asked: null, own: null, checkin: null, trip: null };
+let mineState = emptyMine;
+const mineListeners = new Set();
+let minePolls = 0;
+let mineTimer = 0;
+
+function publishMine(next) {
+  mineState = next;
+  mineListeners.forEach((follow) => follow());
+}
+
+async function loadSafety() {
+  const token = localStorage.getItem("afriresq-auth") || "";
+  if (!token) return mineState;
+  try {
+    const body = await safetyMine(token);
+    publishMine({
+      watching: body.watching || [],
+      asked: body.asked || null,
+      own: body.own || null,
+      checkin: body.checkin || null,
+      trip: body.trip || null,
+    });
+  } catch { /* keep the last copy; an empty list would look like nobody added you */ }
+  return mineState;
+}
+
+function useSafetyMine() {
+  const [mine, setMine] = useState(mineState);
+  useEffect(() => {
+    const follow = () => setMine(mineState);
+    mineListeners.add(follow);
+    minePolls += 1;
+    if (minePolls === 1) {
+      loadSafety();
+      mineTimer = setInterval(loadSafety, 5000);
+    }
+    return () => {
+      mineListeners.delete(follow);
+      minePolls -= 1;
+      if (minePolls === 0) clearInterval(mineTimer);
+    };
+  }, []);
+  return { mine, load: loadSafety };
+}
+
+function secondsLeft(fromIso, secs) {
+  return Math.max(0, Math.ceil((new Date(fromIso).getTime() + Number(secs || 0) * 1000 - Date.now()) / 1000));
+}
+
+function distanceText(metres) {
+  const value = Math.max(0, Number(metres) || 0);
+  if (!value) return "";
+  if (value < 950) return `${Math.max(1, Math.round(value))} m`;
+  const km = value / 1000;
+  return `${km < 10 ? km.toFixed(1) : Math.round(km)} km`;
+}
+
+function tripModeLabel(id) {
+  if (id === "bike") return "Bicycle";
+  if (id === "car") return "Car";
+  return "Walking";
+}
+
+function durationText(total) {
+  const secs = Math.max(0, Number(total) || 0);
+  if (secs < 60) return secs === 1 ? "1 second" : `${secs} seconds`;
+  const mins = Math.round(secs / 60);
+  if (mins < 60) return mins === 1 ? "1 minute" : `${mins} minutes`;
+  const hours = Math.floor(mins / 60);
+  const rem = mins % 60;
+  const hour = hours === 1 ? "1 hour" : `${hours} hours`;
+  return rem ? `${hour} ${rem} min` : hour;
+}
+
+function clockText(total) {
+  const secs = Math.max(0, Number(total) || 0);
+  const hours = Math.floor(secs / 3600);
+  const mins = Math.floor((secs % 3600) / 60);
+  const rest = secs % 60;
+  const tail = `${String(mins).padStart(2, "0")}:${String(rest).padStart(2, "0")}`;
+  return hours ? `${hours}:${tail}` : tail;
+}
+
+function OkAsk({ asked, load }) {
+  const [busy, setBusy] = useState(false);
+  const [left, setLeft] = useState(0);
+  useEffect(() => {
+    if (!asked?.startedAt) return undefined;
+    const tick = () => setLeft(secondsLeft(asked.startedAt, asked.waitSecs));
+    tick();
+    const id = setInterval(tick, 1000);
+    return () => clearInterval(id);
+  }, [asked?.id, asked?.startedAt, asked?.waitSecs]);
+  useEffect(() => {
+    if (!asked?.id || left !== 0) return undefined;
+    const id = setTimeout(() => load(), 400);
+    return () => clearTimeout(id);
+  }, [asked?.id, left, load]);
+  if (!asked) return null;
+  async function answer() {
+    setBusy(true);
+    try {
+      await answerSafetyAlert(asked.id, localStorage.getItem("afriresq-auth") || "");
+      await load();
+    } finally {
+      setBusy(false);
+    }
+  }
+  const title = asked.source === "checkin"
+    ? "Your check-in time is up"
+    : asked.source === "trip"
+      ? "Your trip time is up"
+      : `${asked.fromName} cannot reach you`;
+  return (
+    <div className="card" role="alert">
+      <b>{title}</b>
+      <p className="sub">Are you okay? If you do not answer, your last saved place opens for {asked.fromName}.</p>
+      {left > 0 ? <p className="sub">Opens in {clockText(left)}.</p> : null}
+      <Btn disabled={busy} onClick={answer}>{busy ? "Saving…" : "I am okay"}</Btn>
+    </div>
+  );
+}
+
+const NOTICE_QUIET = new Set(["welcome", "who", "phone", "universities", "email", "code", "profile1", "profile2", "profile3", "safety", "signin", "welcomeBack"]);
+
+export function SafetyNotices() {
+  const { profileDone, screen, go } = useApp();
+  const { mine, load } = useSafetyMine();
+  const [enabled, setEnabled] = useState(notifyEnabled);
+  const [decided, setDecided] = useState(notifyDecided);
+  const asked = mine.asked;
+  useEffect(() => {
+    const onNotify = () => {
+      setEnabled(notifyEnabled());
+      setDecided(notifyDecided());
+    };
+    window.addEventListener("afriresq-notify", onNotify);
+    return () => window.removeEventListener("afriresq-notify", onNotify);
+  }, []);
+  useEffect(() => {
+    if (enabled) registerNotifier();
+    const onGo = (event) => {
+      const next = event.data?.type === "afriresq-go" ? event.data.screen : event.detail;
+      if (next) go(next, null, true);
+    };
+    navigator.serviceWorker?.addEventListener("message", onGo);
+    window.addEventListener("afriresq-go", onGo);
+    return () => {
+      navigator.serviceWorker?.removeEventListener("message", onGo);
+      window.removeEventListener("afriresq-go", onGo);
+    };
+  }, [enabled, go]);
+  useEffect(() => {
+    if (!enabled) return undefined;
+    if (asked?.id) {
+      const title = asked.source === "checkin"
+        ? "Your check-in time is up"
+        : asked.source === "trip"
+          ? "Your trip time is up"
+          : "Are you okay?";
+      showNotice({ key: `asked-${asked.id}`, title, body: "Open AfriResQ to answer.", screen: "" });
+    }
+    mine.watching.forEach((person) => {
+      if (person.alert?.status !== "shared" || !person.alert.id) return;
+      showNotice({
+        key: `shared-${person.alert.id}`,
+        title: "Open AfriResQ",
+        body: `${firstName(person.name)} has not answered.`,
+        screen: "alert",
+      });
+    });
+    return undefined;
+  }, [enabled, asked?.id, asked?.source, mine.watching]);
+  const ask = profileDone
+    && localStorage.getItem("afriresq-auth")
+    && !NOTICE_QUIET.has(screen)
+    && !screen.startsWith("partner")
+    && notifySupported()
+    && notifyPermission() === "default"
+    && !decided
+    && !asked;
+  if (!asked && !ask) return null;
+  return (
+    <div className="safety-notices">
+      <OkAsk asked={asked} load={load} />
+      {ask ? (
+        <div className="card">
+          <b>Allow notifications</b>
+          <p className="sub">While this browser is open, AfriResQ can pop up “Are you okay?” and tell your next of kin to open the app.</p>
+          <div className="ask-actions">
+            <Btn onClick={async () => { await setNotifyChoice(true); setEnabled(notifyEnabled()); setDecided(true); }}>Allow</Btn>
+            <Btn tone="out" onClick={() => { setNotifyChoice(false); setEnabled(false); setDecided(true); }}>Not now</Btn>
+          </div>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function AddedYou({ mine, busyId, note, start }) {
+  return (
+    <>
+      <div className="sec"><h3>Added you as next of kin</h3></div>
+      {note ? <div className="err" role="alert">{note}</div> : null}
+      {!mine.watching.length ? <Note>Nobody has added you as next of kin yet.</Note> : null}
+      {mine.watching.map((person) => (
+        <div className="card" key={person.id} style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+          <b>{person.name}</b>
+          <small>{person.rel || "Next of kin"}</small>
+          {!person.allowed ? <small>They have not allowed an alert.</small> : null}
+          {person.alert?.status === "waiting" ? <small>Asked. Their phone is asking "Are you okay?" for {durationText(person.alert.waitSecs)}.</small> : null}
+          {person.alert?.status === "shared" ? <small>Their last place is open above.</small> : null}
+          {person.allowed && !person.alert ? (
+            <Btn disabled={busyId === person.id} onClick={() => start(person)}>{busyId === person.id ? "Asking…" : `I cannot reach ${firstName(person.name)}`}</Btn>
+          ) : null}
+        </div>
+      ))}
+    </>
+  );
+}
+
+function Alerts() {
+  const { back, openSheet } = useApp();
+  const { mine, load } = useSafetyMine();
+  const [busyId, setBusyId] = useState("");
+  const [note, setNote] = useState("");
+  const followed = mine.watching.find((person) => person.live);
+  const shared = mine.watching.find((person) => person.alert?.status === "shared");
+  async function start(person) {
+    setBusyId(person.id);
+    setNote("");
+    try {
+      await startSafetyAlert(person.id, localStorage.getItem("afriresq-auth") || "");
+      await load();
+    } catch {
+      setNote("The alert could not be started.");
+    } finally {
+      setBusyId("");
+    }
+  }
+  if (followed?.live) {
+    const trail = followed.live.path || [];
+    const last = trail.at(-1);
+    return (
+      <Screen bare>
+        <MapBoard className="map" style={{ height: 260, flex: "none" }} opts={{ look: "route", you: last || null, trail, end: followed.live.lat != null && followed.live.lng != null ? [followed.live.lat, followed.live.lng] : null }}>
+          <button type="button" className="back" onClick={back} aria-label="Back"><Icon n="chevL" /></button>
+          <span className="tagc"><Icon n="route" c="s" />On the way</span>
+        </MapBoard>
+        <div className="panel fill">
+          <div className="grab" />
+          <h3 style={{ font: "800 21px var(--font)", letterSpacing: "-.01em" }}>{firstName(followed.name)} is on the way</h3>
+          <div className="card" style={{ padding: "6px 16px" }}>
+            <div className="kv"><span>Going to</span><b>{followed.live.dest || "A chosen place"}</b></div>
+            <div className="kv"><span>Places saved</span><b>{trail.length ? `${trail.length} along the walk` : "Waiting for the phone"}</b></div>
+          </div>
+          {callHref(followed.phone) ? <a className="btn pri" href={callHref(followed.phone)}><Icon n="phone" />Call {firstName(followed.name)}</a> : null}
+          <a className="btn red" href="tel:999"><Icon n="phone" />Call 999</a>
+          <AddedYou mine={mine} busyId={busyId} note={note} start={start} />
+        </div>
+      </Screen>
+    );
+  }
+  if (shared) {
+    const place = shared.alert.place;
+    return (
+      <Screen bare>
+        <MapBoard className="map" style={{ height: 260, flex: "none" }} opts={{ look: place ? "route" : "", you: place ? [place.lat, place.lng] : null, trail: shared.alert.path }}>
+          <button type="button" className="back" onClick={back} aria-label="Back"><Icon n="chevL" /></button>
+          <span className="tagc"><Icon n="alert" c="s" />Alert open</span>
+        </MapBoard>
+        <div className="panel fill">
+          <div className="grab" />
+          <h3 style={{ font: "800 21px var(--font)", letterSpacing: "-.01em" }}>{firstName(shared.name)} has not answered</h3>
+          <div className="card" style={{ padding: "6px 16px" }}>
+            <div className="kv"><span>Last known place</span><b>{place ? "Shown on the map" : "No place saved yet"}</b></div>
+            <div className="kv"><span>Last ping</span><b>{place ? placeAgo(place.at) : "None"}</b></div>
+            {place?.battery != null ? <div className="kv"><span>Battery then</span><b>{place.battery}%</b></div> : null}
+          </div>
+          {callHref(shared.phone) ? <a className="btn pri" href={callHref(shared.phone)}><Icon n="phone" />Call {firstName(shared.name)}</a> : null}
+          <a className="btn red" href="tel:999"><Icon n="phone" />Call 999</a>
+          <Btn tone="out sm" onClick={() => openSheet("lines")}><Icon n="phone" c="m" />Call 112</Btn>
+          <AddedYou mine={mine} busyId={busyId} note={note} start={start} />
+        </div>
+      </Screen>
+    );
+  }
+  const waiting = mine.watching.some((person) => person.alert?.status === "waiting");
+  const sub = waiting ? "Waiting for an answer" : "No alert has been made";
+  return (
+    <Screen>
+      <PartnerBar title="Alerts" sub={sub} />
+      <div className="body alerts-page">
+        <Hdr title="Alerts" sub={sub} />
+        <div className="form-side">
+          <AddedYou mine={mine} busyId={busyId} note={note} start={start} />
+        </div>
+      </div>
+    </Screen>
+  );
+}
+
+function CheckInDue() {
+  const { user } = useApp();
+  const { mine, load } = useSafetyMine();
+  const [note, setNote] = useState("");
+  const opened = useRef(false);
+  useEffect(() => {
+    const id = setInterval(async () => {
+      const end = Number(localStorage.getItem("afriresq-checkin") || 0);
+      if (!end) {
+        opened.current = false;
+        return;
+      }
+      if (Date.now() < end || opened.current) return;
+      opened.current = true;
+      localStorage.removeItem("afriresq-checkin");
+      const body = await load();
+      if (body?.checkin?.result === "no-kin") {
+        setNote(`${user.kin.name} is not on AfriResQ, so your last place was not opened for them.`);
+      } else if (body?.own?.source === "checkin" && body.own.status === "shared") {
+        setNote(`${user.kin.name} can see your last saved place.`);
+      }
+    }, 1000);
+    return () => clearInterval(id);
+  }, [load, user.kin.name]);
+  if (mine.asked?.source === "checkin") return null;
+  if (!note) return null;
+  return <Note>{note}</Note>;
+}
+
+async function saveFreshPlace(fix, token) {
+  let point = fix?.status === "ready" ? fix : null;
+  if (!point) {
+    try { point = await readFix(); } catch { point = null; }
+  }
+  if (!point?.lat && point?.lat !== 0) return;
+  let battery = null;
+  try {
+    if (navigator.getBattery) {
+      const status = await navigator.getBattery();
+      battery = Math.round(status.level * 100);
+    }
+  } catch { /* this phone does not share the battery */ }
+  await saveLastPlace({
+    lat: point.lat,
+    lng: point.lng,
+    accuracy: point.accuracy,
+    battery,
+    duringTrip: true,
+    fresh: true,
+  }, token);
+}
+
+function CheckInSheet({ closeSheet }) {
+  const [part, setPart] = useState({ h: "", m: "", s: "" });
+  const [left, setLeft] = useState(0);
+  const [problem, setProblem] = useState("");
+  const [busy, setBusy] = useState(false);
+  useEffect(() => {
+    function tick() {
+      const end = Number(localStorage.getItem("afriresq-checkin") || 0);
+      setLeft(end > Date.now() ? Math.ceil((end - Date.now()) / 1000) : 0);
+    }
+    tick();
+    const id = setInterval(tick, 1000);
+    return () => clearInterval(id);
+  }, []);
+  function setField(key, value) {
+    const clean = value.replace(/\D/g, "").slice(0, 2);
+    setPart((current) => ({ ...current, [key]: clean }));
+  }
+  async function start() {
+    const hours = Math.min(48, Number(part.h) || 0);
+    const minutes = Math.min(59, Number(part.m) || 0);
+    const seconds = Math.min(59, Number(part.s) || 0);
+    const total = hours * 3600 + minutes * 60 + seconds;
+    if (!total) return;
+    const token = localStorage.getItem("afriresq-auth") || "";
+    if (!token) {
+      setProblem("Sign in again to set this check-in.");
+      return;
+    }
+    setBusy(true);
+    setProblem("");
+    try {
+      const saved = await startCheckin(total, token);
+      const due = new Date(saved.dueAt).getTime();
+      localStorage.setItem("afriresq-checkin", String(Number.isFinite(due) ? due : Date.now() + total * 1000));
+      setLeft(total);
+      closeSheet();
+    } catch (err) {
+      setProblem(err.message || "The check-in could not be saved.");
+    } finally {
+      setBusy(false);
+    }
+  }
+  async function cancel() {
+    const token = localStorage.getItem("afriresq-auth") || "";
+    if (token) {
+      try { await cancelCheckin(token); } catch { /* the phone clock still stops */ }
+    }
+    localStorage.removeItem("afriresq-checkin");
+    setLeft(0);
+  }
+  return (
+    <>
+      <h3>Check-in</h3>
+      <p className="sub">Set the time yourself. AfriResQ asks "Are you okay?" when it is up. No answer opens your last saved place for your next of kin. The same time is how long a next-of-kin alert waits.</p>
+      {problem ? <div className="err" role="alert">{problem}</div> : null}
+      {left > 0 ? <p className="sub">Asks in {clockText(left)}.</p> : (
+        <div className="checkin-time">
+          {[["h", "Hours"], ["m", "Minutes"], ["s", "Seconds"]].map(([key, label]) => (
+            <Field key={key} label={label}>
+              <Inp mode="numeric" value={part[key]} placeholder="00" onChange={(value) => setField(key, value)} />
+            </Field>
+          ))}
+        </div>
+      )}
+      {left > 0 ? (
+        <Btn tone="out" onClick={cancel}>Cancel this check-in</Btn>
+      ) : (
+        <Btn disabled={busy} onClick={start}>{busy ? "Saving…" : "Start"}</Btn>
+      )}
+    </>
+  );
+}
+
+function NotifyRow() {
+  const [on, setOn] = useState(notifyEnabled);
+  const [note, setNote] = useState("");
+  useEffect(() => {
+    const sync = () => {
+      setOn(notifyEnabled());
+      setNote(notifyPermission() === "denied" ? "This browser is blocking them. Allow AfriResQ in the site settings, then turn this on." : "");
+    };
+    window.addEventListener("afriresq-notify", sync);
+    return () => window.removeEventListener("afriresq-notify", sync);
+  }, []);
+  if (!notifySupported()) return null;
+  return (
+    <div className="ios-row">
+      <span className="ios-ico"><Icon n="bell" /></span>
+      <span className="t">
+        <b>Notifications</b>
+        <small>{note || (on ? "On while this browser is open." : "Off. Turn them on for “Are you okay?”.")}</small>
+      </span>
+      <button
+        type="button"
+        className="switch"
+        role="switch"
+        aria-checked={on}
+        aria-label="Notifications"
+        onClick={async () => {
+          const next = await setNotifyChoice(!on);
+          setOn(next === "on");
+          setNote(next === "denied" ? "This browser is blocking them. Allow AfriResQ in the site settings, then turn this on." : "");
+        }}
+      />
+    </div>
+  );
 }
 
 function SafetyHome() {
-  const { safety, setSafety, keepSafety, user, openSheet, go, fix } = useApp();
+  const { safety, keepSafety, lastPlace, user, openSheet, go, fix } = useApp();
+  const { mine } = useSafetyMine();
   const on = safety.mode !== "off";
-  const ago = ["just now", "1 min ago", "2 min ago", "3 min ago"][safety.pings % 4];
-  const wait = WAIT_MINS.includes(Number(safety.wait)) ? Number(safety.wait) : 30;
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const id = setInterval(() => setNow(Date.now()), 30000);
+    return () => clearInterval(id);
+  }, []);
+  const savedAgo = lastPlace?.at ? placeAgo(lastPlace.at, now) : "";
+  const openAlert = mine.watching.find((person) => person.alert?.status === "shared");
+  const waitingAlert = mine.watching.find((person) => person.alert?.status === "waiting");
+  const added = mine.watching.length;
+  const alertLine = openAlert
+    ? `${firstName(openAlert.name)} has not answered`
+    : waitingAlert
+      ? "Waiting for an answer"
+      : added === 1
+        ? `${firstName(mine.watching[0].name)} added you`
+        : added > 1
+          ? `${added} people added you`
+          : "Who added you";
   const options = [
-    ["always", "Always on (recommended)", "Saves a location every 15 minutes and the last place before the phone dies."],
+    ["always", "Always on (recommended)", "Saves a place about every 5 minutes while AfriResQ is open."],
     ["trips", "Only trips and cases", "Shares during Walk me home and open cases."],
     ["off", "Off", "Nothing is saved."],
   ];
   const steps = [
-    ['Someone says "I cannot reach them"', "A trusted person or the campus desk starts the alert."],
-    ["We ask you first", `Your phone asks "Are you okay?" and waits ${waitText(wait)}.`],
-    ["No answer: your last location is shared", "Trail, time and battery go to your next of kin and the security desk."],
+    ['Someone says "I cannot reach them"', "Your next of kin starts the alert from Safety, then Alerts."],
+    ["We ask you first", 'Your phone asks "Are you okay?" before your place is shared.'],
+    ["No answer: your last location is shared", "Your last saved place opens for the person who asked."],
     ["Alert ends when you answer", "Sharing stops and the alert is logged."],
   ];
   return (
@@ -1751,21 +2251,24 @@ function SafetyHome() {
         <div className="safe">
           <span className="live">{on ? <><i />Saving location</> : "Paused"}</span>
           <h3>{on ? "You are covered" : "Safety Net is off"}</h3>
-          <div className="sm">{on ? <>Last location saved <b>{ago}</b>. Battery 86%. If you go missing, the people you trust can ask AfriResQ to find where you were last.</> : "Turn it on so help can find you faster if you ever go missing."}</div>
+          <div className="sm">{on ? (savedAgo ? <>Last place saved <b>{savedAgo}</b>{lastPlace.battery != null ? `. Battery ${lastPlace.battery}% then` : ""}. If you go missing, someone who you named can ask for this place after you do not answer.</> : "No place saved yet. AfriResQ saves one while this app is open.") : "Turn it on so a saved place exists if you ever go missing."}</div>
         </div>
         </div>
         <div className="safe-map">
-        <MapBoard style={{ height: 170, borderRadius: 20, flex: "none" }} opts={{ trail: on ? TRAIL : null, you: pinFrom(fix, YOU), home: 1 }} />
+        <MapBoard style={{ height: 170, borderRadius: 20, flex: "none" }} opts={{ you: pinFrom(fix, lastPlace ? [lastPlace.lat, lastPlace.lng] : null), home: 1 }} />
         </div>
         <div className="safe-rest">
         <div className="seg3">
           <button type="button" className="tile" onClick={() => go("walk")}><span className="ico green"><Icon n="route" /></span>Walk me home<small>Share a trip with a trusted person</small></button>
           <button type="button" className="tile" onClick={() => openSheet("checkin")}><span className="ico gold"><Icon n="clock" /></span>Check-in<small>Ask me "are you okay?"</small></button>
-          <button type="button" className="tile" onClick={() => go("alert")}><span className="ico violet"><Icon n="users" /></span>Alert preview<small>What a trusted person sees</small></button>
+          <button type="button" className="tile" onClick={() => go("alert")}><span className="ico violet"><Icon n="users" /></span>Alerts<small>{alertLine}</small></button>
         </div>
+        <CheckInDue />
+        {mine.trip?.result === "shared" ? <Note>{user.kin.name} can see your last saved place from the walk.</Note> : null}
+        {mine.trip?.result === "no-kin" ? <Note>{user.kin.name} is not on AfriResQ, so the walk did not open your last place for them.</Note> : null}
         <div className="sec"><h3>When to save your location</h3></div>
         {options.map(([id, title, detail]) => (
-          <button type="button" key={id} className={`radio${safety.mode === id ? " on" : ""}`} onClick={() => setSafety({ ...safety, mode: id })}>
+          <button type="button" key={id} className={`radio${safety.mode === id ? " on" : ""}`} onClick={() => keepSafety({ ...safety, mode: id })}>
             <span className="rd">{safety.mode === id ? <Icon n="check" c="s" /> : null}</span>
             <span><b>{title}</b><small>{detail}</small></span>
           </button>
@@ -1773,7 +2276,7 @@ function SafetyHome() {
         <div className="card row">
           <span className="ico red"><Icon n="users" /></span>
           <div className="grow"><b>{user.kin.name} can start an alert</b><div className="fine" style={{ textAlign: "left", marginTop: 2 }}>Next of kin, {user.kin.rel}</div></div>
-          <button type="button" className="switch" role="switch" aria-checked={safety.kin} aria-label="Next of kin alerts" onClick={() => setSafety({ ...safety, kin: !safety.kin })} />
+          <button type="button" className="switch" role="switch" aria-checked={safety.kin} aria-label="Next of kin alerts" onClick={() => keepSafety({ ...safety, kin: !safety.kin })} />
         </div>
         <div className="card">
           <b style={{ fontSize: 15 }}>How a missing-person alert works</b>
@@ -1784,15 +2287,6 @@ function SafetyHome() {
                 <div>
                   <b style={{ color: "var(--ink)" }}>{title}</b>
                   <small>{detail}</small>
-                  {index === 1 ? (
-                    <div className="chips" style={{ marginTop: 8 }}>
-                      {WAIT_MINS.map((mins) => (
-                        <button type="button" key={mins} className={`chip${wait === mins ? " on" : ""}`} onClick={() => keepSafety({ ...safety, wait: mins })}>
-                          {mins === 60 ? "1 hour" : `${mins} min`}
-                        </button>
-                      ))}
-                    </div>
-                  ) : null}
                 </div>
               </div>
             ))}
@@ -1807,103 +2301,281 @@ function SafetyHome() {
 }
 
 function Walk() {
-  const { user, trip, setTrip, go, showToast, openSheet } = useApp();
-  const [left, setLeft] = useState(trip.mins);
+  const { user, trip, setTrip, go, showToast, openSheet, fix } = useApp();
+  const [left, setLeft] = useState(0);
+  const [busy, setBusy] = useState(false);
+  const [shareLive, setShareLive] = useState(true);
+  const [mode, setMode] = useState("walk");
+  const [problem, setProblem] = useState("");
+  const [dest, setDest] = useState({ kind: "home", text: user.home.text || "Home", lat: user.home.lat, lng: user.home.lng });
+  const [query, setQuery] = useState("");
+  const [editing, setEditing] = useState(false);
+  const [path, setPath] = useState([]);
+  const [walked, setWalked] = useState([]);
+  const [suggest, setSuggest] = useState(0);
+  const [metres, setMetres] = useState(0);
+  const [planning, setPlanning] = useState(false);
+  const finishing = useRef(false);
+  useEffect(() => {
+    if (!trip.running || !trip.dueAt) return undefined;
+    finishing.current = false;
+    const due = new Date(trip.dueAt).getTime();
+    async function tick() {
+      const remain = Math.max(0, Math.ceil((due - Date.now()) / 1000));
+      setLeft(remain);
+      if (remain > 0 || finishing.current) return;
+      finishing.current = true;
+      const token = localStorage.getItem("afriresq-auth") || "";
+      let result = "";
+      try { await saveFreshPlace(fix, token); } catch { /* the last saved place is what opens */ }
+      try {
+        const mine = await loadSafety();
+        result = mine.trip?.result || "";
+        setTrip((current) => ({
+          ...current,
+          running: false,
+          result,
+          askedId: mine.asked?.source === "trip" ? mine.asked.id : "",
+        }));
+      } catch {
+        setTrip((current) => ({ ...current, running: false, result }));
+      }
+      openSheet("tripAlert");
+    }
+    tick();
+    const id = setInterval(tick, 1000);
+    return () => {
+      finishing.current = true;
+      clearInterval(id);
+    };
+  }, [trip.running, trip.dueAt]);
+  useEffect(() => {
+    let cancel = false;
+    loadSafety().then((mine) => {
+      if (cancel || !mine.trip?.dueAt) return;
+      setTrip((current) => (
+        current.running
+          ? current
+          : { ...current, running: true, dueAt: mine.trip.dueAt, result: "", share: Boolean(mine.trip.share) }
+      ));
+    });
+    return () => {
+      cancel = true;
+    };
+  }, []);
+  const hereKey = fix?.status === "ready" ? `${Number(fix.lat).toFixed(3)},${Number(fix.lng).toFixed(3)}` : "";
+  useEffect(() => {
+    if (trip.running || !hereKey) return undefined;
+    const token = localStorage.getItem("afriresq-auth") || "";
+    if (!token) return undefined;
+    let cancel = false;
+    setPlanning(true);
+    const timer = setTimeout(async () => {
+      try {
+        const plan = await planWalk({
+          fromLat: fix.lat,
+          fromLng: fix.lng,
+          toLat: dest.lat,
+          toLng: dest.lng,
+          toText: dest.text,
+          mode,
+        }, token);
+        if (cancel) return;
+        if (!plan.drawn || !plan.points?.length) {
+          setPath([]);
+          setSuggest(0);
+          setMetres(0);
+          setProblem("Google did not return the road from here.");
+          return;
+        }
+        setPath(plan.points);
+        setSuggest(plan.seconds || 0);
+        setMetres(plan.metres || 0);
+        setProblem("");
+        setDest((current) => (
+          current.lat == null || current.lng == null
+            ? { ...current, lat: plan.toLat, lng: plan.toLng, text: plan.label || current.text }
+            : current
+        ));
+      } catch (err) {
+        if (!cancel) setProblem(err.message || "The path could not be drawn.");
+      } finally {
+        if (!cancel) setPlanning(false);
+      }
+    }, 400);
+    return () => {
+      cancel = true;
+      clearTimeout(timer);
+    };
+  }, [hereKey, dest.kind, dest.text, dest.lat, dest.lng, trip.running, mode]);
   useEffect(() => {
     if (!trip.running) return undefined;
+    const token = localStorage.getItem("afriresq-auth") || "";
     const id = setInterval(() => {
-      setLeft((value) => {
-        if (value <= 1) {
-          setTrip({ ...trip, running: false });
-          openSheet("tripAlert");
-          return 0;
-        }
-        return value - 1;
-      });
-    }, 4000);
+      saveFreshPlace(fix, token).then(() => {
+        if (fix?.status === "ready") setWalked((current) => [...current, [fix.lat, fix.lng]].slice(-240));
+      }).catch(() => {});
+    }, 20000);
     return () => clearInterval(id);
-  }, [trip.running]);
+  }, [trip.running, fix?.lat, fix?.lng, fix?.status]);
+  async function begin() {
+    const token = localStorage.getItem("afriresq-auth") || "";
+    if (!token) {
+      showToast("Sign in again to start this trip.");
+      return;
+    }
+    if (fix?.status !== "ready") {
+      setProblem("Waiting for this phone's place.");
+      return;
+    }
+    setBusy(true);
+    setProblem("");
+    try {
+      const plan = await planWalk({
+        fromLat: fix.lat,
+        fromLng: fix.lng,
+        toLat: dest.lat,
+        toLng: dest.lng,
+        toText: dest.text,
+        mode,
+      }, token);
+      const total = plan.drawn ? plan.seconds : 0;
+      if (!total || !plan.points?.length) {
+        setProblem("Google did not return the road, so the trip was not started.");
+        return;
+      }
+      const going = {
+        ...dest,
+        lat: plan.toLat ?? dest.lat,
+        lng: plan.toLng ?? dest.lng,
+        text: plan.label || dest.text,
+      };
+      setPath(plan.points || path);
+      setMetres(plan.metres || metres);
+      setSuggest(total);
+      const saved = await startTrip(total, going, token, shareLive);
+      try { await saveFreshPlace(fix, token); } catch { /* the last saved place is used if this one fails */ }
+      setTrip({
+        ...trip,
+        running: true,
+        dueAt: saved.dueAt,
+        result: "",
+        share: shareLive,
+        metres: plan.metres || metres,
+        mode,
+      });
+    } catch (err) {
+      showToast(err.message || "The trip could not be started.");
+    } finally {
+      setBusy(false);
+    }
+  }
+  async function end() {
+    finishing.current = true;
+    const token = localStorage.getItem("afriresq-auth") || "";
+    try {
+      if (token) await endTrip(token);
+    } catch (err) {
+      showToast(err.message || "The trip could not be ended.");
+      return;
+    }
+    setTrip({ ...trip, running: false, dueAt: null, result: "", share: false, askedId: "" });
+    showToast("Trip ended. Your place stays private.");
+    go("safetyHome", null, true);
+  }
   return (
     <Screen>
-      <div className="body">
-        <PageArt kind="walk" title="Walk me home" sub="Share a trip" sos />
+      <div className="body walk-page">
+        <PageArt
+          kind="walk"
+          title="Walk me home"
+          sub="The route sets the time"
+          sos
+          art={<MapBoard opts={{ look: trip.running ? "route" : "you", you: pinFrom(fix, null), route: trip.running ? path : [], trail: trip.running ? walked : [], end: trip.running && dest.lat != null && dest.lng != null ? [dest.lat, dest.lng] : null }} />}
+        />
         <div className="form-side">
         {trip.running ? (
           <>
             <div className="safe">
               <span className="live"><i />Trip in progress</span>
               <h3>{firstName(user.name)}, you are on your way</h3>
-              <div className="sm">{user.kin.name} and the campus desk can see this trip. If you do not arrive in time, they are alerted with your last location.</div>
+              <div className="sm">{trip.share
+                ? `${user.kin.name} can see where you are and where you are going while AfriResQ is open. Tap I am safe when you arrive. If the time runs out first, your phone asks if you are okay before ${user.kin.name} is told.`
+                : `This walk stays private while the time is running. Tap I am safe when you arrive. If the time runs out first, your phone asks if you are okay, and no answer tells ${user.kin.name}.`}</div>
             </div>
             <div className="card" style={{ textAlign: "center", display: "flex", flexDirection: "column", gap: 6 }}>
-              <div className="lbl">Time left</div>
-              <div className="countdown">{left}:00</div>
+              <div className="lbl">Arrives in</div>
+              <div className="countdown">{clockText(left)}</div>
+              <div className="fine">{[distanceText(trip.metres), tripModeLabel(trip.mode)].filter(Boolean).join(" · ")}</div>
             </div>
-            <Btn onClick={() => { setTrip({ ...trip, running: false }); showToast("Trip ended. Sharing stopped."); go("safetyHome", null, true); }}><Icon n="check" />I am safe, end trip</Btn>
+            <Btn onClick={end}><Icon n="check" />I am safe, end trip</Btn>
           </>
         ) : (
           <>
-            <p className="sub">Tell us where you are going and how long it should take. A trusted person follows along until you arrive.</p>
-            <Field label="Going to">
-              <div className="chips">
-                <button type="button" className="chip on"><Icon n="home" c="s" />Home pin</button>
-                <button type="button" className="chip">{user.hall}</button>
-              </div>
-            </Field>
-            <Field label="It should take">
-              <div className="chips">
-                {[10, 20, 30, 45].map((mins) => (
-                  <button type="button" key={mins} className={`chip${trip.mins === mins ? " on" : ""}`} onClick={() => setTrip({ ...trip, mins })}>{mins} min</button>
-                ))}
-              </div>
-            </Field>
+            <p className="sub">The map shows where you are. Home is the place until you change it. The distance is the road from here. The time starts when you start the trip.</p>
             <div className="card row">
-              <span className="ico red"><Icon n="users" /></span>
-              <div className="grow"><b>{user.kin.name}</b><div className="fine" style={{ textAlign: "left" }}>Follows your trip</div></div>
-              <Icon n="check" c="m" />
+              <span className="ico green"><Icon n="pin" /></span>
+              <div className="grow"><b>Where you are</b><div className="fine" style={{ textAlign: "left" }}>{fix?.status === "ready" ? "This phone's place" : "Waiting for this phone"}</div></div>
             </div>
-            <Note icon="lock">Sharing ends when you arrive or tap "I am safe".</Note>
+            <button type="button" className="card row pick" onClick={() => setEditing((open) => !open)}>
+              <span className="ico gold"><Icon n="home" /></span>
+              <div className="grow"><b>{dest.kind === "home" ? "Home" : "Going to"}</b><div className="fine" style={{ textAlign: "left" }}>{dest.text || "Choose a place"}</div></div>
+              <small>Change</small>
+            </button>
+            {editing ? (
+              <>
+                <Field label="Where are you going?">
+                  <Inp icon="pin" value={query} placeholder="Street and town" onChange={setQuery} />
+                </Field>
+                <Btn onClick={() => {
+                  const text = query.trim();
+                  if (!text) return;
+                  setProblem("");
+                  setDest({ kind: "place", text, lat: null, lng: null });
+                  setEditing(false);
+                }}>Find this place</Btn>
+                <Btn tone="out" onClick={() => {
+                  setProblem("");
+                  setDest({ kind: "home", text: user.home.text || "Home", lat: user.home.lat, lng: user.home.lng });
+                  setQuery("");
+                  setEditing(false);
+                }}>Use my home</Btn>
+              </>
+            ) : null}
+            <div className="mode-picks" role="group" aria-label="How you are going">
+              {[["walk", "Walking", "walk"], ["bike", "Bicycle", "bike"], ["car", "Car", "car"]].map(([id, label, icon]) => (
+                <button type="button" key={id} className={`chip${mode === id ? " on" : ""}`} aria-label={label} title={label} onClick={() => setMode(id)}><Icon n={icon} /></button>
+              ))}
+            </div>
+            <div className="card" style={{ padding: "6px 16px" }}>
+              <div className="kv"><span>{dest.kind === "home" ? "Distance to home" : "Distance"}</span><b>{planning ? "Finding the road…" : metres ? distanceText(metres) : "—"}</b></div>
+            </div>
+            {problem ? <div className="err" role="alert">{problem}</div> : null}
+            <Note icon="lock">A locked phone stops at the last place. The path continues when AfriResQ is open again.</Note>
           </>
         )}
         </div>
       </div>
       {trip.running ? null : (
         <div className="foot">
-          <Btn onClick={() => { setLeft(trip.mins); setTrip({ ...trip, running: true, left: trip.mins }); }}><Icon n="route" />Start trip</Btn>
+          <div className="walk-start">
+            <Btn disabled={busy || planning || !suggest} onClick={begin}>{busy ? "Starting…" : "Start trip"}</Btn>
+            <div className="card row">
+              <div className="grow">
+                <b>Share my live location</b>
+                <div className="fine" style={{ textAlign: "left", marginTop: 3 }}>{user.kin.name} sees where you are and where you are going, until you arrive.</div>
+              </div>
+              <button type="button" className="switch" role="switch" aria-checked={shareLive} aria-label="Share my live location" onClick={() => setShareLive((on) => !on)} />
+            </div>
+          </div>
         </div>
       )}
     </Screen>
   );
 }
 
-function AlertView() {
-  const { back, user, showToast, openSheet, fix } = useApp();
-  return (
-    <Screen bare>
-      <MapBoard className="map" style={{ height: 260, flex: "none" }} opts={{ trail: TRAIL, you: pinFrom(fix, YOU), home: 1 }}>
-        <button type="button" className="back" onClick={back} aria-label="Back"><Icon n="chevL" /></button>
-        <span className="tagc"><Icon n="alert" c="s" />Alert open</span>
-      </MapBoard>
-      <div className="panel fill">
-        <div className="grab" />
-        <Note tone="violet" icon="users">This is what a trusted person sees. You would only see this screen if you were the one searching.</Note>
-        <h3 style={{ font: "800 21px var(--font)", letterSpacing: "-.01em" }}>{firstName(user.name)} has not answered for 30 minutes</h3>
-        <div className="card" style={{ padding: "6px 16px" }}>
-          <div className="kv"><span>Last known place</span><b>Makerere Hill Rd</b></div>
-          <div className="kv"><span>Last ping</span><b>14:12, 32 min ago</b></div>
-          <div className="kv"><span>Battery then</span><b>12%, then phone off</b></div>
-          <div className="kv"><span>Moving?</span><b>Yes, towards the north gate</b></div>
-        </div>
-        <Btn onClick={() => showToast(`Calling ${firstName(user.name)}...`)}><Icon n="phone" />Call {firstName(user.name)}</Btn>
-        <Btn tone="out" onClick={() => showToast("Trail sent to the campus security desk")}><Icon n="share" c="m" />Send the trail to campus security</Btn>
-        <Btn tone="out sm" onClick={() => openSheet("lines")}><Icon n="phone" c="m" />Call 999</Btn>
-      </div>
-    </Screen>
-  );
-}
-
 function Account() {
-  const { user, student, safety, theme, setTheme, go, openSheet, signOut } = useApp();
+  const { user, student, safety, theme, go, openSheet, signOut } = useApp();
   const photoInput = useRef(null);
   const photo = useProfilePhoto();
   const rows = [
@@ -1937,60 +2609,204 @@ function Account() {
   return (
     <Screen tabs>
       <div className="body account">
-        <div className="page-bar">
-        <div className="profile-top">
-          <div className="profile-photo">
-            <button type="button" className="profile-circle" aria-label={photo ? "Change profile photo" : "Add a profile photo"} onClick={() => photoInput.current?.click()}>
-              {photo ? <img src={photo} alt="" /> : <Icon n="user" />}
-            </button>
-            Profile
-            {photo ? <button type="button" className="link profile-remove" onClick={() => saveProfilePhoto("")}>Remove photo</button> : null}
-          </div>
+        <div className="account-id">
+          <button type="button" className="profile-circle" aria-label={photo ? "Change profile photo" : "Add a profile photo"} onClick={() => photoInput.current?.click()}>
+            {photo ? <img src={photo} alt="" /> : <Icon n="user" c="l" />}
+          </button>
           <input ref={photoInput} type="file" accept="image/*" hidden onChange={choosePhoto} />
-          <div className="scard">
-            <span className="pill" style={{ background: "rgba(255,255,255,.2)", color: "#fff" }}>
-              <Icon n={student ? "cap" : "user"} c="s" />{student ? "Verified student" : "Citizen"}
-            </span>
-            <div className="nm">{user.name}</div>
-            <small>{student ? `${user.uni || "Makerere University"}, student no. ${user.studentNo}` : "Phone confirmed by SMS"}</small>
-          </div>
+          <h2>{user.name}</h2>
+          <p>{student ? `${user.uni || "Makerere University"} · ${user.studentNo}` : "Phone confirmed by SMS"}</p>
+          {photo ? <button type="button" className="link" onClick={() => saveProfilePhoto("")}>Remove photo</button> : null}
         </div>
-        </div>
-        <div className="card list" style={{ padding: "4px 14px" }}>
-          {rows.map(([icon, tone, title, sub, action]) => (
-            <button type="button" className="rw" key={title} onClick={action}>
-              <span className={`ico ${tone}`}><Icon n={icon} /></span>
-              <span className="t"><b>{title}</b><small>{sub}</small></span>
-              <Icon n="chevR" c="chev" />
-            </button>
-          ))}
-        </div>
-        <div className="card appear">
-          <div className="row">
-            <span className="ico plain"><Icon n="moon" /></span>
-            <div className="grow">
-              <b>Appearance</b>
-              <small>{theme === "dark" ? "Dark" : theme === "auto" ? "Matches this device" : "Light"}</small>
-            </div>
-          </div>
-          <div className="appear-set" role="radiogroup" aria-label="Appearance">
-            {[["light", "Light"], ["dark", "Dark"], ["auto", "Auto"]].map(([id, label]) => (
-              <button type="button" key={id} role="radio" aria-checked={theme === id} className={theme === id ? "on" : ""} onClick={() => setTheme(id)}>{label}</button>
+        <div className="account-block">
+          <div className="account-label">Account</div>
+          <div className="ios-group">
+            {rows.map(([icon, , title, sub, action]) => (
+              <button type="button" className="ios-row" key={title} onClick={action}>
+                <span className="ios-ico"><Icon n={icon} /></span>
+                <span className="t"><b>{title}</b><small>{sub}</small></span>
+                <Icon n="chevR" c="chev" />
+              </button>
             ))}
           </div>
         </div>
-        <button type="button" className="pcard" onClick={() => go("welcomeBack", null, true)}>
-          <span className="ico plain"><Icon n="lock" /></span>
-          <span className="t"><b>Lock AfriResQ</b><small>Fingerprint to open it again</small></span>
-          <Icon n="chevR" c="chev" />
-        </button>
-        <button type="button" className="pcard" onClick={signOut}>
-          <span className="ico red"><Icon n="logout" /></span>
-          <span className="t"><b>Sign out</b><small>Leave this account on this device</small></span>
-          <Icon n="chevR" c="chev" />
-        </button>
+        <div className="account-block">
+          <div className="account-label">Preferences</div>
+          <div className="ios-group">
+            <button type="button" className="ios-row" onClick={() => openSheet("theme")}>
+              <span className="ios-ico"><Icon n={theme === "dark" ? "moon" : "sun"} /></span>
+              <span className="t"><b>Appearance</b><small>{theme === "dark" ? "Dark" : theme === "auto" ? "Matches this device" : "Light"}</small></span>
+              <Icon n="chevR" c="chev" />
+            </button>
+            <NotifyRow />
+          </div>
+        </div>
+        <div className="account-block">
+          <div className="ios-group">
+            <button type="button" className="ios-row" onClick={() => go("welcomeBack", null, true)}>
+              <span className="ios-ico"><Icon n="lock" /></span>
+              <span className="t"><b>Lock AfriResQ</b><small>Fingerprint to open it again</small></span>
+              <Icon n="chevR" c="chev" />
+            </button>
+            <button type="button" className="ios-row danger" onClick={signOut}>
+              <span className="t"><b>Sign out</b></span>
+            </button>
+          </div>
+        </div>
       </div>
     </Screen>
+  );
+}
+
+function messageWhen(iso) {
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return "";
+  return date.toLocaleString(undefined, { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" });
+}
+
+async function loadAnnouncement(token) {
+  const res = await fetch("/api/announcements/mine", {
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+  });
+  const body = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(body.error || "The messages could not be loaded.");
+  return body;
+}
+
+function Announce() {
+  const { go, user } = useApp();
+  const [data, setData] = useState(null);
+  const [text, setText] = useState("");
+  const [error, setError] = useState("");
+  const [busy, setBusy] = useState(false);
+  const end = useRef(null);
+  const token = () => localStorage.getItem("afriresq-auth") || "";
+
+  async function load() {
+    const body = await loadAnnouncement(token());
+    setData(body);
+    const latest = body.messages?.[body.messages.length - 1];
+    if (latest) localStorage.setItem("afriresq-announce-seen", latest.id);
+    return body;
+  }
+
+  useEffect(() => {
+    let stop = false;
+    load().catch((err) => { if (!stop) setError(err.message); });
+    const id = setInterval(() => { load().catch(() => {}); }, 8000);
+    return () => { stop = true; clearInterval(id); };
+  }, []);
+
+  useEffect(() => {
+    end.current?.scrollIntoView({ block: "end" });
+  }, [data?.messages?.length]);
+
+  async function send(event) {
+    event.preventDefault();
+    const body = text.trim();
+    if (!body || busy) return;
+    setBusy(true);
+    setError("");
+    try {
+      const res = await fetch("/api/announcements/mine", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token()}` },
+        body: JSON.stringify({ body }),
+      });
+      const next = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(next.error || "The message could not be sent.");
+      setData(next);
+      setText("");
+      const latest = next.messages?.[next.messages.length - 1];
+      if (latest) localStorage.setItem("afriresq-announce-seen", latest.id);
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const group = data?.group;
+  return (
+    <Screen>
+      <div className="body announce">
+        <div className="hdr">
+          <button type="button" className="back" onClick={() => go("home", null, true)} aria-label="Back"><Icon n="chevL" /></button>
+          <div className="grow">
+            <h2>{group?.name || "Announcements"}</h2>
+            <small>{group ? group.university : user.uni || "Your university"}</small>
+          </div>
+        </div>
+        {error ? <Note tone="red" icon="alert">{error}</Note> : null}
+        <div className="announce-log">
+          {group && !data.messages.length ? <p className="announce-empty">No message yet. When an admin sends one, it appears here.</p> : null}
+          {!group && data ? <p className="announce-empty">Your university has no announcement group yet.</p> : null}
+          {(data?.messages || []).map((message) => (
+            <div className={`announce-msg${message.mine ? " mine" : ""}`} key={message.id}>
+              {message.mine ? null : <b>{message.senderName}</b>}
+              <p>{message.body}</p>
+              <small>{messageWhen(message.at)}</small>
+            </div>
+          ))}
+          <div ref={end} />
+        </div>
+        {data?.admin ? (
+          <form className="announce-send" onSubmit={send}>
+            <textarea value={text} rows={2} placeholder="Write a message" onChange={(event) => setText(event.target.value)} />
+            <button type="submit" className="btn pri" disabled={busy || !text.trim()}>{busy ? "Sending…" : "Send"}</button>
+          </form>
+        ) : group ? <p className="announce-lock">Only admins can send a message.</p> : null}
+      </div>
+    </Screen>
+  );
+}
+
+export function MessageButton() {
+  const { student, profileDone, screen, go } = useApp();
+  const [group, setGroup] = useState(null);
+  useEffect(() => {
+    if (!student || !profileDone) {
+      setGroup(null);
+      return undefined;
+    }
+    let stop = false;
+    async function look() {
+      const token = localStorage.getItem("afriresq-auth") || "";
+      if (!token) return;
+      try {
+        const body = await loadAnnouncement(token);
+        if (stop) return;
+        setGroup(body.group);
+        const latest = body.messages?.[body.messages.length - 1];
+        if (!latest || screen === "announce") {
+          if (latest) localStorage.setItem("afriresq-announce-seen", latest.id);
+          return;
+        }
+        const seen = localStorage.getItem("afriresq-announce-seen") || "";
+        if (!seen) {
+          localStorage.setItem("afriresq-announce-seen", latest.id);
+          return;
+        }
+        if (seen !== latest.id) {
+          showNotice({
+            key: `announce-${latest.id}`,
+            title: body.group?.name || "Announcement",
+            body: latest.body,
+            screen: "announce",
+          });
+          localStorage.setItem("afriresq-announce-seen", latest.id);
+        }
+      } catch { /* the icon stays hidden until the group can be read */ }
+    }
+    look();
+    const id = setInterval(look, 20000);
+    return () => { stop = true; clearInterval(id); };
+  }, [student, profileDone, screen]);
+  if (!group || screen === "announce" || String(screen).startsWith("partner")) return null;
+  return (
+    <button type="button" className="msg-fab" aria-label="Announcements" onClick={() => go("announce")}>
+      <Icon n="chat" />
+    </button>
   );
 }
 
@@ -2026,7 +2842,8 @@ const screens = {
   partnerHome: PartnerHome,
   safetyHome: SafetyHome,
   walk: Walk,
-  alert: AlertView,
+  alert: Alerts,
+  announce: Announce,
   account: Account,
 };
 
@@ -2109,9 +2926,41 @@ function PasswordSheet() {
   );
 }
 
+function TripTimeUp() {
+  const { user, trip, setTrip, closeSheet, showToast } = useApp();
+  const [busy, setBusy] = useState(false);
+  async function okay() {
+    setBusy(true);
+    const token = localStorage.getItem("afriresq-auth") || "";
+    try {
+      let id = trip?.askedId || "";
+      if (!id) {
+        const mine = await loadSafety();
+        id = mine.asked?.source === "trip" ? mine.asked.id : "";
+      }
+      if (id) await answerSafetyAlert(id, token);
+      setTrip((current) => ({ ...current, running: false, dueAt: null, result: "", share: false, askedId: "" }));
+      closeSheet();
+      showToast("You are okay. Your place stays private.");
+    } catch (err) {
+      showToast(err.message || "That answer could not be saved.");
+    } finally {
+      setBusy(false);
+    }
+  }
+  return (
+    <>
+      <div className="ico red" style={{ width: 56, height: 56, borderRadius: 18 }}><Icon n="alert" c="l" /></div>
+      <h3>Your trip time is up</h3>
+      <p className="sub">Are you okay? If you do not answer, {user.kin.name} is told and can see your last saved place.</p>
+      <Btn disabled={busy} onClick={okay}>{busy ? "Saving…" : "I am okay"}</Btn>
+    </>
+  );
+}
+
 export function Sheets() {
   const app = useApp();
-  const { sheet, closeSheet, showToast, user, setUser, go, kase, moveCase, clearCase } = app;
+  const { sheet, closeSheet, showToast, user, setUser, go, kase, moveCase, clearCase, trip } = app;
   if (!sheet) return <div className="backdrop" />;
   let body = null;
   if (sheet === "lines") {
@@ -2153,27 +3002,23 @@ export function Sheets() {
     );
   }
   if (sheet === "checkin") {
-    body = (
-      <>
-        <h3>Check-in</h3>
-        <p className="sub">We ask "Are you okay?" at the time you choose. No answer sends an alert to your trusted person.</p>
-        <div className="chips">
-          {["In 30 min", "In 1 hour", "In 2 hours"].map((item) => (
-            <button type="button" key={item} className="chip" onClick={() => { closeSheet(); showToast(`Check-in set: ${item.toLowerCase()}`); }}>{item}</button>
-          ))}
-        </div>
-      </>
-    );
+    body = <CheckInSheet closeSheet={closeSheet} />;
   }
   if (sheet === "tripAlert") {
-    body = (
-      <>
-        <div className="ico red" style={{ width: 56, height: 56, borderRadius: 18 }}><Icon n="alert" c="l" /></div>
-        <h3>Alert sent</h3>
-        <p className="sub">You did not arrive in time. {user.kin.name} and the campus security desk now have your last location and trail.</p>
-        <Btn onClick={closeSheet}>OK</Btn>
-      </>
-    );
+    body = trip?.result === "asking"
+      ? <TripTimeUp />
+      : (
+        <>
+          <div className="ico red" style={{ width: 56, height: 56, borderRadius: 18 }}><Icon n="alert" c="l" /></div>
+          <h3>Time ran out</h3>
+          <p className="sub">
+            {trip?.result === "no-kin"
+              ? `${user.kin.name} is not on AfriResQ, so your last place was not opened for them.`
+              : "The trip ended before a place could be opened. Your last place stays private."}
+          </p>
+          <Btn onClick={closeSheet}>OK</Btn>
+        </>
+      );
   }
   if (sheet === "med") {
     body = (
@@ -2217,6 +3062,25 @@ export function Sheets() {
   }
   if (sheet === "password") {
     body = <PasswordSheet />;
+  }
+  if (sheet === "theme") {
+    const choices = [
+      ["light", "Light", "Always light"],
+      ["dark", "Dark", "Always dark"],
+      ["auto", "Auto", "Matches this device"],
+    ];
+    body = (
+      <>
+        <h3>Appearance</h3>
+        <p className="sub">Choose how AfriResQ looks.</p>
+        {choices.map(([id, title, line]) => (
+          <button type="button" key={id} className={`radio${app.theme === id ? " on" : ""}`} onClick={() => { app.setTheme(id); closeSheet(); }}>
+            <span className="rd">{app.theme === id ? <Icon n="check" c="s" /> : null}</span>
+            <span><b>{title}</b><small>{line}</small></span>
+          </button>
+        ))}
+      </>
+    );
   }
   if (sheet === "lang") {
     body = (

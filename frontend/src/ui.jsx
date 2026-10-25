@@ -237,6 +237,7 @@ export function MapBoard({ opts = {}, className = "map", style, children, onPin,
     opts.route ? opts.route.map((point) => point.join(",")).join(";") : "",
     opts.trail ? opts.trail.map((point) => point.join(",")).join(";") : "",
     opts.you ? opts.you.join(",") : "",
+    opts.end ? opts.end.join(",") : "",
     opts.amb ? opts.amb.join(",") : "",
     opts.home ? homePoint(user).join(",") : "",
     student ? user.uni || "" : "",
@@ -296,6 +297,7 @@ export function MapBoard({ opts = {}, className = "map", style, children, onPin,
       marker?.on("click", () => onPinRef.current?.(id));
     });
     dot(latLng(opts.you), "#0B8F4D", "#ffffff", 8, false, "You are here");
+    dot(latLng(opts.end), "#E39A0B", "#ffffff", 8, false, "Going here");
     if (opts.home) dot(latLng(homePoint(user)), "#E39A0B", "#ffffff", 8);
     dot(latLng(opts.amb), "#D93636", "#ffffff", 9);
 
@@ -405,6 +407,7 @@ export function MapBoard({ opts = {}, className = "map", style, children, onPin,
       extend(point);
     });
     circle(latLng(opts.you), "#0B8F4D", "#ffffff", 8, "You are here");
+    circle(latLng(opts.end), "#E39A0B", "#ffffff", 8, "Going here");
     if (opts.home) circle(latLng(homePoint(user)), "#E39A0B", "#ffffff", 8);
     circle(latLng(opts.amb), "#D93636", "#ffffff", 9);
 

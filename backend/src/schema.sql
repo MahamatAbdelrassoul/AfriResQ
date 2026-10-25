@@ -187,6 +187,32 @@ alter table people add column if not exists blocked_reason text not null default
 -- A password set at sign-up, so a member can sign in again without a code. Only the hash is stored.
 alter table people add column if not exists password_hash text not null default '';
 alter table people add column if not exists safety_wait_mins integer not null default 30;
+alter table people add column if not exists last_lat double precision;
+alter table people add column if not exists last_lng double precision;
+alter table people add column if not exists last_accuracy integer;
+alter table people add column if not exists last_battery integer;
+alter table people add column if not exists kin_phone_digits text not null default '';
+create index if not exists people_kin_phone_idx on people (kin_phone_digits) where kin_phone_digits <> '';
+update people set kin_phone_digits = case
+  when regexp_replace(kin_phone, '\D', '', 'g') ~ '^2567[0-9]{8}' then substring(regexp_replace(kin_phone, '\D', '', 'g') from 4 for 9)
+  when regexp_replace(kin_phone, '\D', '', 'g') ~ '^07[0-9]{8}' then substring(regexp_replace(kin_phone, '\D', '', 'g') from 2 for 9)
+  when regexp_replace(kin_phone, '\D', '', 'g') ~ '^7[0-9]{8}$' then regexp_replace(kin_phone, '\D', '', 'g')
+  else ''
+end
+where kin_phone <> '';
+
+create table if not exists safety_alerts (
+  id uuid primary key default gen_random_uuid(),
+  person_id uuid not null references people (id),
+  kin_id uuid not null references people (id),
+  status text not null default 'waiting' check (status in ('waiting', 'shared', 'answered')),
+  wait_mins integer not null,
+  started_at timestamptz not null default now(),
+  answered_at timestamptz
+);
+create unique index if not exists safety_alerts_one_open
+  on safety_alerts (person_id)
+  where status in ('waiting', 'shared');
 alter table people add column if not exists failed_logins integer not null default 0;
 alter table people add column if not exists locked_until timestamptz;
 
@@ -256,3 +282,52 @@ alter table auth_codes enable row level security;
 alter table auth_sessions enable row level security;
 alter table admin_log enable row level security;
 alter table partner_sessions enable row level security;
+alter table safety_alerts enable row level security;
+
+-- How long a person chose, in seconds, before a missed check-in or a next-of-kin alert opens their last place.
+alter table people add column if not exists safety_wait_secs integer not null default 1800;
+alter table people add column if not exists checkin_due_at timestamptz;
+alter table people add column if not exists checkin_result text not null default '';
+alter table people add column if not exists trip_due_at timestamptz;
+alter table people add column if not exists trip_result text not null default '';
+alter table people add column if not exists trip_path jsonb not null default '[]';
+alter table people add column if not exists trip_dest_text text not null default '';
+alter table people add column if not exists trip_dest_lat double precision;
+alter table people add column if not exists trip_dest_lng double precision;
+alter table people add column if not exists trip_share boolean not null default false;
+alter table safety_alerts add column if not exists wait_secs integer;
+alter table safety_alerts add column if not exists source text not null default 'kin';
+update safety_alerts set wait_secs = wait_mins * 60 where wait_secs is null;
+do $$
+begin
+  if not exists (select 1 from pg_constraint where conname = 'safety_alerts_source_check') then
+    alter table safety_alerts add constraint safety_alerts_source_check check (source in ('kin', 'checkin', 'trip'));
+  end if;
+end $$;
+
+-- One announcement group per university. Students of that email domain can read it.
+-- The university is the admin. It can add students of the same university as extra admins.
+create table if not exists announcement_groups (
+  id uuid primary key default gen_random_uuid(),
+  partner_id uuid not null unique references partner_applications (id) on delete cascade,
+  name text not null,
+  created_at timestamptz not null default now()
+);
+
+create table if not exists announcement_admins (
+  group_id uuid not null references announcement_groups (id) on delete cascade,
+  person_id uuid not null references people (id) on delete cascade,
+  primary key (group_id, person_id)
+);
+
+create table if not exists announcement_messages (
+  id uuid primary key default gen_random_uuid(),
+  group_id uuid not null references announcement_groups (id) on delete cascade,
+  body text not null,
+  sender_kind text not null check (sender_kind in ('partner', 'person')),
+  sender_id text not null default '',
+  sender_name text not null,
+  created_at timestamptz not null default now()
+);
+create index if not exists announcement_messages_group_idx
+  on announcement_messages (group_id, created_at);

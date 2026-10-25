@@ -1,12 +1,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { findPerson, isStudentEmail, loginWithPassword, requestOtp, savePerson, studentHost, verifyOtp } from "./account-api.js";
+import { findPerson, isStudentEmail, loginWithPassword, requestOtp, saveLastPlace, savePerson, studentHost, verifyOtp } from "./account-api.js";
 import { AppState } from "./app-state.js";
 import { createCase, getCase, listMyCases, updateCase } from "./case-api.js";
 import { readFix } from "./locate.js";
 import { PLACES } from "./map.js";
 import { listPlaces } from "./places-api.js";
 import { Sprite } from "./ui.jsx";
-import { CurrentScreen, EdgeLine, Sheets, TabBar, Toast } from "./screens.jsx";
+import { CurrentScreen, EdgeLine, MessageButton, SafetyNotices, Sheets, TabBar, Toast } from "./screens.jsx";
 
 const studentSeed = {
   type: "student",
@@ -48,12 +48,12 @@ function rememberLogin(user) {
   } catch { /* the form starts empty next time */ }
 }
 
-const OPEN_SCREENS = new Set(["welcome", "signin", "welcomeBack", "partnerGate", "partnerLogin", "partnerHome", "home", "places", "safetyHome", "account"]);
+const OPEN_SCREENS = new Set(["welcome", "signin", "welcomeBack", "partnerGate", "partnerLogin", "partnerHome", "home", "places", "safetyHome", "account", "alert", "announce"]);
 
 function screenFromAddress(profileDone) {
   const name = window.location.hash.replace(/^#\//, "").split(/[/?#]/)[0];
   if (!OPEN_SCREENS.has(name)) return "";
-  if (["home", "places", "safetyHome", "account"].includes(name) && !profileDone) return "";
+  if (["home", "places", "safetyHome", "account", "alert", "announce"].includes(name) && !profileDone) return "";
   return name;
 }
 
@@ -76,6 +76,7 @@ export default function App() {
   const [signinTab, setSigninTab] = useState(lastLogin?.tab || "phone");
   const [newPassword, setNewPassword] = useState({ value: "", again: "" });
   const [safety, setSafety] = useState(saved?.safety || { mode: "always", kin: true, pings: 3, wait: 30 });
+  const [lastPlace, setLastPlace] = useState(null);
   const [report, setReport] = useState({
     what: "Injury or fall",
     awake: "Yes",
@@ -142,6 +143,7 @@ export default function App() {
         setUser(found.user);
         setProfileDone(true);
         setSafety(found.safety);
+        setLastPlace(found.lastPlace || null);
         persist(found.user, true, found.safety);
       })
       .catch(() => {});
@@ -171,6 +173,65 @@ export default function App() {
       ignore = true;
     };
   }, [profileDone, authToken]);
+
+  // While AfriResQ is open, take a fresh GPS reading and store it about every 5 minutes,
+  // including when the person has not moved. The extra few seconds let the database
+  // rule (no more than one place per 5 minutes) accept the next one.
+  useEffect(() => {
+    if (!profileDone || !authToken || safety.mode === "off") return undefined;
+    if (safety.mode === "trips" && !trip.running && !kase?.id) return undefined;
+    let stop = false;
+    let timer = 0;
+    const gap = 5 * 60 * 1000 + 10 * 1000;
+    const again = (ms) => {
+      if (!stop) timer = window.setTimeout(capture, ms);
+    };
+    async function capture() {
+      if (stop) return;
+      let point = null;
+      let gpsCode = 0;
+      try {
+        point = await readFix();
+      } catch (err) {
+        gpsCode = err?.code || 0;
+      }
+      if (stop) return;
+      if (!point) {
+        again(gpsCode === 1 ? gap : 60 * 1000);
+        return;
+      }
+      const next = { ...point, status: "ready" };
+      fixRef.current = next;
+      setFix(next);
+      let battery = null;
+      try {
+        if (navigator.getBattery) {
+          const status = await navigator.getBattery();
+          battery = Math.round(status.level * 100);
+        }
+      } catch { /* this phone does not share the battery */ }
+      if (stop) return;
+      try {
+        const body = await saveLastPlace({
+          lat: point.lat,
+          lng: point.lng,
+          accuracy: point.accuracy,
+          battery,
+          duringTrip: trip.running,
+        }, authToken);
+        if (!stop && body.lastPlace) setLastPlace(body.lastPlace);
+        const at = body.lastPlace?.at ? new Date(body.lastPlace.at).getTime() : 0;
+        again(body.saved || !at ? gap : Math.max(15 * 1000, at + gap - Date.now()));
+      } catch {
+        again(60 * 1000);
+      }
+    }
+    capture();
+    return () => {
+      stop = true;
+      window.clearTimeout(timer);
+    };
+  }, [profileDone, authToken, safety.mode, trip.running, kase?.id]);
 
   useEffect(() => {
     if (!toast) return undefined;
@@ -363,6 +424,7 @@ export default function App() {
     setNewPassword,
     safety,
     setSafety,
+    lastPlace,
     async keepSafety(next) {
       setSafety(next);
       persist(user, profileDone, next);
@@ -501,6 +563,7 @@ export default function App() {
         setUser(result.account.user);
         setProfileDone(true);
         setSafety(result.account.safety);
+        setLastPlace(result.account.lastPlace || null);
         persist(result.account.user, true, result.account.safety);
         rememberLogin(result.account.user);
         showToast("Signed in. Welcome back.");
@@ -554,6 +617,7 @@ export default function App() {
           setUser(result.account.user);
           setProfileDone(true);
           setSafety(result.account.safety);
+          setLastPlace(result.account.lastPlace || null);
           persist(result.account.user, true, result.account.safety);
           rememberLogin(result.account.user);
           showToast(result.account.user.hasPassword ? "Signed in. Welcome back." : "Signed in. Add a password under Account to skip the code next time.");
@@ -680,6 +744,8 @@ export default function App() {
       <div className="app" data-tabs={["home", "places", "safetyHome", "account"].includes(screen) ? "1" : "0"} data-shell={["welcome", "who", "phone", "universities", "email", "code", "profile1", "profile2", "profile3", "safety", "signin", "welcomeBack", "partnerJoin", "partnerGate", "partnerSignin", "partnerQueue", "partnerCase", "partnerLogin", "partnerHome"].includes(screen) ? "0" : "1"} data-lightstatus={["welcome", "welcomeBack"].includes(screen) ? "1" : "0"}>
         <Sprite />
         <CurrentScreen />
+        <SafetyNotices />
+        <MessageButton />
         <TabBar />
         <EdgeLine />
         <Sheets />

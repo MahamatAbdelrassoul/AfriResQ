@@ -55,6 +55,20 @@ export async function savePerson(user, profileDone, safety, token, password) {
   return body;
 }
 
+export async function saveLastPlace(point, token) {
+  const res = await fetch("/api/people/location", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    },
+    body: JSON.stringify(point),
+  });
+  const body = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(body.error || "The place could not be saved.");
+  return body;
+}
+
 export async function findPerson({ phone, email }, token) {
   const params = new URLSearchParams();
   if (phone) params.set("phone", phone);
@@ -66,4 +80,73 @@ export async function findPerson({ phone, email }, token) {
   const body = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(body.error || "The profile could not be loaded.");
   return body;
+}
+
+function safetyHeaders(token) {
+  return token ? { Authorization: `Bearer ${token}` } : {};
+}
+
+export async function safetyMine(token) {
+  const res = await fetch("/api/safety/mine", { headers: safetyHeaders(token) });
+  const body = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(body.error || "The alerts could not be opened.");
+  return body;
+}
+
+export async function startSafetyAlert(personId, token) {
+  const res = await fetch("/api/safety/alerts", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...safetyHeaders(token) },
+    body: JSON.stringify({ personId }),
+  });
+  const body = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(body.error || "The alert could not be started.");
+  return body;
+}
+
+export async function answerSafetyAlert(id, token) {
+  const res = await fetch(`/api/safety/alerts/${id}/answer`, {
+    method: "POST",
+    headers: safetyHeaders(token),
+  });
+  const body = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(body.error || "The answer could not be saved.");
+  return body;
+}
+
+async function safetySend(path, method, token, payload) {
+  const res = await fetch(path, {
+    method,
+    headers: { "Content-Type": "application/json", ...safetyHeaders(token) },
+    body: payload ? JSON.stringify(payload) : undefined,
+  });
+  const body = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(body.error || "That could not be saved.");
+  return body;
+}
+
+export function startCheckin(seconds, token) {
+  return safetySend("/api/safety/checkin", "POST", token, { seconds });
+}
+
+export function cancelCheckin(token) {
+  return safetySend("/api/safety/checkin", "DELETE", token);
+}
+
+export function startTrip(seconds, dest, token, share) {
+  return safetySend("/api/safety/trip", "POST", token, {
+    seconds,
+    destText: dest?.text || "",
+    destLat: dest?.lat,
+    destLng: dest?.lng,
+    share: share === true,
+  });
+}
+
+export function planWalk(body, token) {
+  return safetySend("/api/safety/route", "POST", token, body);
+}
+
+export function endTrip(token) {
+  return safetySend("/api/safety/trip", "DELETE", token);
 }
