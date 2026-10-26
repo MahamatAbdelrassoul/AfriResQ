@@ -1180,6 +1180,7 @@ function messageWhen(iso) {
 function PartnerAnnouncements({ onSignedOut }) {
   const token = readPartnerSession()?.token || "";
   const [data, setData] = useState(null);
+  const [name, setName] = useState("");
   const [text, setText] = useState("");
   const [email, setEmail] = useState("");
   const [error, setError] = useState("");
@@ -1271,7 +1272,40 @@ function PartnerAnnouncements({ onSignedOut }) {
 
   if (!data) return error ? <Note tone="red" icon="alert">{error}</Note> : <div className="pd-card pd-loading">Opening the group…</div>;
   if (!data.group) {
-    return <div className="pd-card"><b>No announcement group yet</b><p className="pd-fine">This university did not create one when it joined. Creating a group from here comes later.</p></div>;
+    return (
+      <div className="pd-card">
+        {error ? <Note tone="red" icon="alert">{error}</Note> : null}
+        <b>No group yet</b>
+        <p className="pd-fine">Students of this university already see the chat. Create the group here and they can read every message. Only admins can send.</p>
+        <form className="announce-send" onSubmit={async (event) => {
+          event.preventDefault();
+          const value = name.trim();
+          if (!value || busy) return;
+          setBusy("group");
+          setError("");
+          try {
+            const res = await fetch("/api/announcements/desk/group", {
+              method: "POST",
+              headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+              body: JSON.stringify({ name: value }),
+            });
+            const next = await res.json().catch(() => ({}));
+            if (res.status === 401) throw new PartnerSignedOut("Sign in with the partner code first.");
+            if (!res.ok) throw new Error(next.error || "The group could not be created.");
+            setName("");
+            setData(next);
+          } catch (err) {
+            if (err instanceof PartnerSignedOut) onSignedOut();
+            else setError(err.message);
+          } finally {
+            setBusy("");
+          }
+        }}>
+          <Inp icon="users" value={name} placeholder="Kyambogo announcements" onChange={setName} />
+          <button type="submit" className="btn pri" disabled={Boolean(busy) || !name.trim()}>{busy === "group" ? "Creating…" : "Create group"}</button>
+        </form>
+      </div>
+    );
   }
   return (
     <div className="pd-card announce-desk">

@@ -1297,6 +1297,50 @@ button.desk-entry {
     flex-shrink: 0;
   }
 
+  .screen:has(> .body.walk-page) {
+    overflow-x: hidden;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .body.walk-page {
+    overflow: visible;
+    flex: none;
+    padding-top: 0;
+  }
+
+  .body.walk-page > .lede {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    position: sticky;
+    top: 0;
+    z-index: 4;
+    background: var(--bg);
+    padding-top: 8px;
+    padding-bottom: 4px;
+  }
+
+  .walk-page .scene-points {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 8px;
+    padding-right: 22px;
+  }
+
+  .walk-page .scene-points > div {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    min-width: 0;
+  }
+
+  .walk-page .scene-points .i { width: 16px; height: 16px; flex: none; }
+  .walk-page .scene-points b { font-size: 12px; font-weight: 600; line-height: 1.2; }
+  .walk-page .scene-points small { display: none; }
+
   .screen.bare:has(> .panel) > .mapfull {
     flex: none;
     height: 240px;
@@ -1855,7 +1899,21 @@ button.desk-entry {
   padding-bottom: 8px;
 }
 .announce-log.desk { flex: none; max-height: 360px; }
-.announce-empty, .announce-lock { color: var(--ink2); font-size: 14px; font-weight: 500; line-height: 1.45; }
+.announce-log.is-empty { justify-content: center; }
+.announce-lock { color: var(--ink2); font-size: 14px; font-weight: 500; line-height: 1.45; }
+.announce-empty {
+  align-self: center;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  max-width: 280px;
+  margin: auto;
+  text-align: center;
+}
+.announce-empty .ico { width: 56px; height: 56px; border-radius: 18px; }
+.announce-empty b { font-size: 17px; font-weight: 600; }
+.announce-empty p { margin: 0; color: var(--ink2); font-size: 14px; font-weight: 500; line-height: 1.45; }
 .announce-msg {
   align-self: flex-start;
   max-width: min(440px, 88%);
@@ -1886,12 +1944,33 @@ button.desk-entry {
 
 @media (min-width: 960px) {
   .msg-fab { right: 28px; bottom: 28px; }
-  .screen:not(.bare):not(.has-tabs):has(.hdr) .body.announce {
+  .screen:not(.bare):not(.has-tabs):has(.body.announce) {
+    overflow: hidden;
+  }
+  .screen:not(.bare):not(.has-tabs):has(.body.announce) > .body.announce > .hdr {
+    display: none;
+  }
+  .screen:not(.bare):not(.has-tabs):has(.body.announce) > .body.announce {
     display: flex;
     flex-direction: column;
-    width: min(720px, calc(100% - 80px));
-    margin: 28px auto;
+    align-items: center;
+    flex: 1;
+    min-height: 0;
+    width: 100%;
+    max-width: none;
+    margin: 0;
+    padding: 8px 56px 28px;
     grid-template-columns: none;
+  }
+  .screen:not(.bare):not(.has-tabs):has(.body.announce) > .body.announce > .announce-log.is-empty {
+    width: 100%;
+    align-items: center;
+  }
+  .screen:not(.bare):not(.has-tabs):has(.body.announce) > .body.announce > .announce-log:not(.is-empty),
+  .screen:not(.bare):not(.has-tabs):has(.body.announce) > .body.announce > .announce-send,
+  .screen:not(.bare):not(.has-tabs):has(.body.announce) > .body.announce > .announce-lock,
+  .screen:not(.bare):not(.has-tabs):has(.body.announce) > .body.announce > .note {
+    width: min(720px, 100%);
   }
   .screen:not(.bare):not(.has-tabs):has(.hdr) .body.announce > .hdr,
   .screen:not(.bare):not(.has-tabs):has(.hdr) .body.announce > * {
@@ -1899,4 +1978,9 @@ button.desk-entry {
     grid-row: auto;
     position: static;
   }
+}
+
+@media (max-width: 959px) {
+  .screen:has(> .body.announce) > .partner-bar { display: none; }
+  .app[data-shell="0"] .screen:has(> .body.announce) > .body.announce { padding-top: 8px; }
 }

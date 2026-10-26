@@ -184,6 +184,37 @@ export function announcementRouter(pool) {
     }
   });
 
+  router.post("/desk/group", async (req, res) => {
+    try {
+      const partner = await partnerFromRequest(pool, req);
+      if (!partner) {
+        res.status(401).json({ error: "Sign in with the partner code first." });
+        return;
+      }
+      if (partner.applicant_kind !== "university") {
+        res.status(403).json({ error: "Only a university can create this group." });
+        return;
+      }
+      const name = clean(req.body?.name, 80);
+      if (!name) {
+        res.status(400).json({ error: "Name the group first." });
+        return;
+      }
+      const existing = await groupForPartner(pool, partner.id);
+      if (existing) {
+        res.status(409).json({ error: "This university already has a group." });
+        return;
+      }
+      const saved = await pool.query(
+        "insert into announcement_groups (partner_id, name) values ($1, $2) returning id, name",
+        [partner.id, name],
+      );
+      res.status(201).json({ group: { id: saved.rows[0].id, name: saved.rows[0].name }, messages: [], admins: [] });
+    } catch {
+      res.status(503).json({ error: "The database is not available." });
+    }
+  });
+
   router.post("/desk", async (req, res) => {
     try {
       const partner = await partnerFromRequest(pool, req);

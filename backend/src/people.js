@@ -1,5 +1,5 @@
 import { Router } from "express";
-import { authSession, isStudentEmail, PASSWORD_MIN, personFromRequest, sessionToken, ugandaPhone } from "./auth.js";
+import { authSession, acceptedStudentEmail, PASSWORD_MIN, personFromRequest, sessionToken, ugandaPhone } from "./auth.js";
 import { hashCode } from "./desks.js";
 
 function digits(phone) {
@@ -10,20 +10,25 @@ function text(value) {
   return String(value || "").trim();
 }
 
+function plainEmail(value) {
+  const email = text(value).toLowerCase();
+  return /^[^@\s]+@[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?\.[a-z]{2,}$/.test(email) ? email : "";
+}
+
 function toRow(body) {
   const user = body?.user || {};
   const safety = body?.safety || {};
   const phone = ugandaPhone(user.phone);
   const personType = user.type === "student" ? "student" : user.type === "citizen" ? "citizen" : "";
   const name = text(user.name);
-  const email = isStudentEmail(user.email) || text(user.email).toLowerCase();
+  const email = plainEmail(user.email);
   if (!phone) {
     return { error: "Enter a Uganda mobile number, for example 772 123 456." };
   }
   if (!personType) return { error: "Say whether this person is a citizen or a student." };
   if (!name) return { error: "Enter the person's name." };
-  if (personType === "student" && !isStudentEmail(email)) {
-    return { error: "Use your Makerere student email, name@students.mak.ac.ug." };
+  if (personType === "student" && !email) {
+    return { error: "Use the student email from your university." };
   }
   // Optional on every save. An empty password keeps the one already stored.
   const password = typeof body?.password === "string" ? body.password : "";
@@ -169,12 +174,17 @@ export function peopleRouter(pool) {
       if (!matches) {
         res.status(401).json({
           error: student
-            ? "Confirm the Makerere student email before saving this profile."
+            ? "Confirm your student email before saving this profile."
             : "Confirm the phone number by SMS before saving this profile.",
         });
         return;
       }
       if (student) {
+        const allowed = await acceptedStudentEmail(pool, parsed.email);
+        if (!allowed) {
+          res.status(400).json({ error: "That university is not confirmed on AfriResQ yet." });
+          return;
+        }
         // A student types the phone number; it is not confirmed. It must not take over someone else's row.
         const owner = await pool.query("select email from people where phone_digits = $1", [parsed.phoneDigits]);
         if (owner.rows[0] && owner.rows[0].email.toLowerCase() !== parsed.email) {

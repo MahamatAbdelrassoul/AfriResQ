@@ -1,5 +1,7 @@
 export function studentHost(domain = "mak.ac.ug") {
-  return `students.${domain}`;
+  const host = String(domain || "").replace(/^@/, "").trim().toLowerCase();
+  if (host.startsWith("students.")) return host;
+  return `students.${host}`;
 }
 
 export function isStudentEmail(value, domain = "mak.ac.ug") {

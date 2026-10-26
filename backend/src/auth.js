@@ -17,10 +17,29 @@ function studentDomain() {
   return String(process.env.STUDENT_EMAIL_DOMAIN || "students.mak.ac.ug").trim().toLowerCase();
 }
 
-export function isStudentEmail(value) {
+function emailShape(value) {
   const email = String(value || "").trim().toLowerCase();
-  const domain = studentDomain().replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  return new RegExp(`^[^@\\s]+@${domain}$`).test(email) ? email : "";
+  return /^[^@\s]+@[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?\.[a-z]{2,}$/.test(email) ? email : "";
+}
+
+export function isStudentEmail(value) {
+  const email = emailShape(value);
+  if (!email) return "";
+  return email.split("@")[1] === studentDomain() ? email : "";
+}
+
+export async function acceptedStudentEmail(pool, value) {
+  const email = emailShape(value);
+  if (!email) return "";
+  const domain = email.split("@")[1];
+  if (domain === studentDomain()) return email;
+  const found = await pool.query(
+    `select 1 from partner_applications
+     where status = 'approved' and applicant_kind = 'university' and lower(student_domain) = $1
+     limit 1`,
+    [domain],
+  );
+  return found.rowCount ? email : "";
 }
 
 export function ugandaPhone(value) {
@@ -85,13 +104,13 @@ export function authRouter(pool) {
     }
 
     const phone = ugandaPhone(req.body?.phone);
-    const email = isStudentEmail(req.body?.email);
+    const email = channel === "email" ? await acceptedStudentEmail(pool, req.body?.email) : "";
     if (channel === "sms" && !phone) {
       res.status(400).json({ error: "Enter a Uganda mobile number, for example 772 123 456." });
       return;
     }
     if (channel === "email" && !email) {
-      res.status(400).json({ error: `Use a Makerere student email, name@${studentDomain()}.` });
+      res.status(400).json({ error: "Use a student email from a university AfriResQ has confirmed." });
       return;
     }
     const destination = channel === "sms" ? phone.national : email;
@@ -164,7 +183,7 @@ export function authRouter(pool) {
     const channel = req.body?.channel === "email" ? "email" : req.body?.channel === "sms" ? "sms" : "";
     const code = String(req.body?.code || "").replace(/\D/g, "");
     const phone = ugandaPhone(req.body?.phone);
-    const email = isStudentEmail(req.body?.email);
+    const email = channel === "email" ? await acceptedStudentEmail(pool, req.body?.email) : "";
     const destination = channel === "sms" ? phone?.national : channel === "email" ? email : "";
     if (!destination || code.length !== 6) {
       res.status(400).json({ error: "Enter the 6-digit code from the message." });
@@ -268,6 +287,27 @@ export function authRouter(pool) {
       res.json({ token, account: fromRow(person) });
     } catch {
       res.status(503).json({ error: "Sign-in is not available right now." });
+    }
+  });
+
+  router.get("/universities", async (_req, res) => {
+    try {
+      const makerere = studentDomain();
+      const found = await pool.query(
+        `select organisation, city, student_domain
+         from partner_applications
+         where status = 'approved' and applicant_kind = 'university' and student_domain <> ''
+         order by organisation`,
+      );
+      const universities = [{ name: "Makerere University", city: "Kampala", domain: makerere }];
+      for (const row of found.rows) {
+        const domain = String(row.student_domain || "").toLowerCase();
+        if (!domain || domain === makerere) continue;
+        universities.push({ name: row.organisation, city: row.city || "", domain });
+      }
+      res.json({ universities });
+    } catch {
+      res.status(503).json({ error: "The university list is not available." });
     }
   });
 

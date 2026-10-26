@@ -551,19 +551,37 @@ function Phone() {
 
 function Universities() {
   const { uniQuery, setUniQuery, pickUni } = useApp();
-  const list = UNIS.filter((item) => item[0].toLowerCase().includes(uniQuery.toLowerCase()));
+  const [open, setOpen] = useState([]);
+  useEffect(() => {
+    let stop = false;
+    fetch("/api/auth/universities")
+      .then((res) => res.json())
+      .then((body) => { if (!stop) setOpen(body.universities || []); })
+      .catch(() => {});
+    return () => { stop = true; };
+  }, []);
+  const list = UNIS.map((item) => {
+    const hit = open.find((uni) => uni.name.toLowerCase() === item[0].toLowerCase());
+    return hit ? [item[0], hit.city || item[1], 1, hit.domain] : item;
+  });
+  open.forEach((uni) => {
+    if (!list.some((item) => item[0].toLowerCase() === uni.name.toLowerCase())) {
+      list.push([uni.name, uni.city || "Uganda", 1, uni.domain]);
+    }
+  });
+  const shown = list.filter((item) => item[0].toLowerCase().includes(uniQuery.toLowerCase()));
   return (
     <Screen>
       <div className="body">
         <PageArt kind="university" title="Choose your university" sub="Step 1 of 3" />
         <div className="form-side">
-        <p className="sub">Every university we plan to cover is listed. Only live ones can finish sign-up.</p>
+        <p className="sub">A university can take students after AfriResQ confirms it. The others are listed for later.</p>
         <div className="inp">
           <Icon n="search" />
           <input placeholder="Search universities" value={uniQuery} autoComplete="off" onChange={(event) => setUniQuery(event.target.value)} />
         </div>
         <div className="card list" style={{ padding: "6px 14px" }}>
-          {list.length ? list.map((item) => (
+          {shown.length ? shown.map((item) => (
             <button type="button" className="rw" key={item[0]} onClick={() => pickUni(item[0], item[2], item[3])}>
               <span className={`ico ${item[2] ? "violet" : "plain"}`}><Icon n="cap" /></span>
               <span className="t"><b>{item[0]}</b><small>{item[1]}</small></span>
@@ -957,8 +975,17 @@ function DeclinedPanel({ where, reason, onOther, onCall }) {
 }
 
 function Home() {
-  const { user, student, safety, go, openSheet, setMode, setPlace, setReport, setOtherType, places } = useApp();
+  const { user, student, safety, go, openSheet, setMode, setPlace, setReport, setOtherType, places, kase } = useApp();
   const photo = useProfilePhoto();
+  const { mine } = useSafetyMine();
+  const [bellSeen, setBellSeen] = useState(readBellSeen);
+  const notices = bellItems({ mine, kase, places, user });
+  const unread = notices.some((item) => !bellSeen.includes(item.key));
+  useEffect(() => {
+    const sync = () => setBellSeen(readBellSeen());
+    window.addEventListener("afriresq-bell", sync);
+    return () => window.removeEventListener("afriresq-bell", sync);
+  }, []);
   const on = safety.mode !== "off";
   const hospital = places.mak;
   return (
@@ -973,8 +1000,8 @@ function Home() {
             <h2>{greetWord()}, {firstName(user.name)}</h2>
             <small><Icon n="pin" c="s" />{user.home.text}</small>
           </div>
-          <button type="button" className="icon-btn" aria-label="Notifications" onClick={() => openSheet("notifs")}>
-            <Icon n="bell" /><i className="dot" />
+          <button type="button" className="icon-btn" aria-label={unread ? "Notifications, new" : "Notifications"} onClick={() => { markBellSeen(notices.map((item) => item.key)); openSheet("notifs"); }}>
+            <Icon n="bell" />{unread ? <i className="dot" /> : null}
           </button>
         </div>
         </div>
@@ -982,7 +1009,7 @@ function Home() {
         <RequestStatusCard />
         <CheckInDue />
         <button type="button" className={`sn${on ? "" : " off"}`} onClick={() => go("safetyHome", null, true)}>
-          <i />{on ? "Safety Net is on. A place is saved while AfriResQ is open." : "Safety Net is off. Nothing is saved."}
+          <i />{on ? "Safety Net on, location saved" : "Safety Net is off. Nothing is saved."}
         </button>
         <div className="desk-hero">
         <button type="button" className="hero" onClick={() => { setReport((current) => ({ ...current, done: false })); go("report"); }}>
@@ -2727,20 +2754,35 @@ function Announce() {
   }
 
   const group = data?.group;
+  const title = group?.name || "Announcements";
+  const sub = group ? group.university : user.uni || "Your university";
   return (
     <Screen>
+      <PartnerBar title={title} sub={sub} />
       <div className="body announce">
         <div className="hdr">
           <button type="button" className="back" onClick={() => go("home", null, true)} aria-label="Back"><Icon n="chevL" /></button>
           <div className="grow">
-            <h2>{group?.name || "Announcements"}</h2>
-            <small>{group ? group.university : user.uni || "Your university"}</small>
+            <h2>{title}</h2>
+            <small>{sub}</small>
           </div>
         </div>
         {error ? <Note tone="red" icon="alert">{error}</Note> : null}
-        <div className="announce-log">
-          {group && !data.messages.length ? <p className="announce-empty">No message yet. When an admin sends one, it appears here.</p> : null}
-          {!group && data ? <p className="announce-empty">Your university has no announcement group yet.</p> : null}
+        <div className={`announce-log${group && data?.messages?.length ? "" : " is-empty"}`}>
+          {group && data && !data.messages.length ? (
+            <div className="announce-empty">
+              <span className="ico plain"><Icon n="chat" /></span>
+              <b>Group created</b>
+              <p>Waiting for the first message.</p>
+            </div>
+          ) : null}
+          {!group && data ? (
+            <div className="announce-empty">
+              <span className="ico plain"><Icon n="chat" /></span>
+              <b>No group yet</b>
+              <p>Your university has not created one. When it does, the messages will show up here.</p>
+            </div>
+          ) : null}
           {(data?.messages || []).map((message) => (
             <div className={`announce-msg${message.mine ? " mine" : ""}`} key={message.id}>
               {message.mine ? null : <b>{message.senderName}</b>}
@@ -2802,7 +2844,7 @@ export function MessageButton() {
     const id = setInterval(look, 20000);
     return () => { stop = true; clearInterval(id); };
   }, [student, profileDone, screen]);
-  if (!group || screen === "announce" || String(screen).startsWith("partner")) return null;
+  if (!student || !profileDone || screen === "announce" || String(screen).startsWith("partner")) return null;
   return (
     <button type="button" className="msg-fab" aria-label="Announcements" onClick={() => go("announce")}>
       <Icon n="chat" />
@@ -2958,9 +3000,128 @@ function TripTimeUp() {
   );
 }
 
+const BELL_SEEN = "afriresq-bell-seen";
+
+function readBellSeen() {
+  try {
+    return (localStorage.getItem(BELL_SEEN) || "").split(",").filter(Boolean);
+  } catch {
+    return [];
+  }
+}
+
+function markBellSeen(keys) {
+  const seen = new Set(readBellSeen());
+  let changed = false;
+  keys.forEach((key) => {
+    if (key && !seen.has(key)) {
+      seen.add(key);
+      changed = true;
+    }
+  });
+  if (!changed) return;
+  try {
+    localStorage.setItem(BELL_SEEN, [...seen].slice(-80).join(","));
+  } catch { /* the dot still clears for this visit */ }
+  window.dispatchEvent(new CustomEvent("afriresq-bell"));
+}
+
+function bellItems({ mine, kase, places, user }) {
+  const items = [];
+  const asked = mine?.asked;
+  const kin = user?.kin?.name || "your next of kin";
+  if (asked?.id) {
+    const title = asked.source === "checkin"
+      ? "Your check-in time is up"
+      : asked.source === "trip"
+        ? "Your trip time is up"
+        : `${asked.fromName} cannot reach you`;
+    items.push({
+      key: `asked-${asked.id}`,
+      icon: "alert",
+      tone: "red",
+      title,
+      detail: `Are you okay? If you do not answer, your last saved place opens for ${asked.fromName}.`,
+      screen: "",
+    });
+  } else if (mine?.own?.status === "shared") {
+    items.push({
+      key: `own-shared-${mine.own.source || "kin"}`,
+      icon: "pin",
+      tone: "red",
+      title: "Your last place is open",
+      detail: `${kin} can see your last saved place.`,
+      screen: "safetyHome",
+    });
+  }
+  (mine?.watching || []).forEach((person) => {
+    if (person.alert?.status === "waiting") {
+      items.push({
+        key: `wait-${person.alert.id}`,
+        icon: "clock",
+        tone: "gold",
+        title: `Waiting for ${firstName(person.name)}`,
+        detail: "Their phone is asking \"Are you okay?\"",
+        screen: "alert",
+      });
+    } else if (person.alert?.status === "shared") {
+      items.push({
+        key: `shared-${person.alert.id}`,
+        icon: "pin",
+        tone: "red",
+        title: `${firstName(person.name)} has not answered`,
+        detail: "Their last saved place is open.",
+        screen: "alert",
+      });
+    }
+  });
+  if (!asked && mine?.checkin?.result === "no-kin") {
+    items.push({
+      key: "checkin-no-kin",
+      icon: "users",
+      tone: "gold",
+      title: "Check-in could not open a place",
+      detail: `${kin} is not on AfriResQ, so your last place was not opened.`,
+      screen: "safetyHome",
+    });
+  }
+  if (!asked && mine?.trip?.result === "no-kin") {
+    items.push({
+      key: "trip-no-kin",
+      icon: "users",
+      tone: "gold",
+      title: "The trip could not open a place",
+      detail: `${kin} is not on AfriResQ, so your last place was not opened.`,
+      screen: "safetyHome",
+    });
+  }
+  const status = kase ? REQUEST_STATUS[kase.state] : null;
+  if (status) {
+    const where = places?.[kase.place]?.name || kase.desk || "the desk";
+    items.push({
+      key: `case-${kase.id}-${kase.state}`,
+      icon: "amb",
+      tone: status[2] === "bad" ? "red" : status[2] === "warn" ? "gold" : "green",
+      title: status[0],
+      detail: kase.state === "declined"
+        ? (kase.declineReason ? `${where}. ${kase.declineReason}` : `${where} could not take this request.`)
+        : `${kase.what ? `${kase.what}. ` : ""}${where}. ${status[1]}`,
+      screen: kase.kind === "other" ? "desk" : kase.path === "ambulance" ? "ambulance" : "route",
+      place: kase.place || "",
+    });
+  }
+  return items;
+}
+
 export function Sheets() {
   const app = useApp();
-  const { sheet, closeSheet, showToast, user, setUser, go, kase, moveCase, clearCase, trip } = app;
+  const { sheet, closeSheet, showToast, user, setUser, go, kase, places, setPlace, moveCase, clearCase, trip } = app;
+  const { mine } = useSafetyMine();
+  const notices = bellItems({ mine, kase, places, user });
+  const noticeKeys = notices.map((item) => item.key).join("|");
+  useEffect(() => {
+    if (sheet === "notifs") markBellSeen(notices.map((item) => item.key));
+  }, [sheet, noticeKeys]);
   if (!sheet) return <div className="backdrop" />;
   let body = null;
   if (sheet === "lines") {
@@ -2974,14 +3135,24 @@ export function Sheets() {
     );
   }
   if (sheet === "notifs") {
+    const openNotice = (item) => {
+      closeSheet();
+      if (item.place) setPlace(item.place);
+      if (item.screen) go(item.screen);
+    };
     body = (
       <>
         <h3>Notifications</h3>
-        <div className="card list" style={{ padding: "4px 14px" }}>
-          <div className="rw"><span className="ico green"><Icon n="check" /></span><span className="t"><b>Profile saved</b><small>Your medical card is ready for an open case</small></span></div>
-          <div className="rw"><span className="ico green"><Icon n="radio" /></span><span className="t"><b>Safety Net is on</b><small>Last location saved a minute ago</small></span></div>
-          <div className="rw"><span className="ico violet"><Icon n="amb" /></span><span className="t"><b>Makerere University Hospital is connected</b><small>An ambulance can be sent</small></span></div>
-        </div>
+        {notices.length ? (
+          <div className="card list" style={{ padding: "4px 14px" }}>
+            {notices.map((item) => (
+              <button type="button" className="rw" key={item.key} onClick={() => openNotice(item)}>
+                <span className={`ico ${item.tone}`}><Icon n={item.icon} /></span>
+                <span className="t"><b>{item.title}</b><small>{item.detail}</small></span>
+              </button>
+            ))}
+          </div>
+        ) : <p className="sub">Nothing needs you right now.</p>}
       </>
     );
   }

@@ -67,7 +67,10 @@ export default function App() {
   const [profileDone, setProfileDone] = useState(Boolean(saved?.profileDone));
   const [screen, setScreen] = useState(opened || (saved?.profileDone ? "welcomeBack" : "welcome"));
   const [stack, setStack] = useState([opened || (saved?.profileDone ? "welcomeBack" : "welcome")]);
-  const [theme, setThemeState] = useState(localStorage.getItem("afriresq-appearance") || "light");
+  const [theme, setThemeState] = useState(() => {
+    const stored = localStorage.getItem("afriresq-appearance");
+    return stored === "dark" || stored === "auto" ? stored : "light";
+  });
   const [flow, setFlow] = useState("signup");
   const [uni, setUni] = useState("Makerere University");
   const [uniDomain, setUniDomain] = useState("mak.ac.ug");
@@ -519,7 +522,7 @@ export default function App() {
         return;
       }
       setUni(name);
-      setUniDomain(domain);
+      setUniDomain(studentHost(domain));
       patchUser({ uni: name });
       go("email");
     },
@@ -536,8 +539,8 @@ export default function App() {
       const phone = signinTab === "phone";
       const digits = (user.phone || "").replace(/\D/g, "");
       const email = (user.email || "").trim();
-      if (phone ? !/^7\d{8}$/.test(digits) : !isStudentEmail(email)) {
-        setError(phone ? "Enter your 9-digit Uganda number." : `Use your Makerere student email, name@${studentHost()}.`);
+      if (phone ? !/^7\d{8}$/.test(digits) : !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) {
+        setError(phone ? "Enter your 9-digit Uganda number." : "Enter the student email on your account.");
         return;
       }
       const ok = await issueCode({ channel: phone ? "sms" : "email", purpose: "signin" });
