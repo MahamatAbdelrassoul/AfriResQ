@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import medicalArt from "./assets/scenes/scene-medical.png";
 import { getCase, listDeskCases, updateCase } from "./case-api.js";
 import { clearDeskSession, closeDesk, deskMe, openDesk, readDeskSession, saveDeskSession } from "./desk-api.js";
@@ -136,6 +136,35 @@ const NEXT = {
   on_the_way: ["arrived", "Arrived"],
   arrived: ["closed", "Close the case"],
 };
+
+const PATH_SHORT = {
+  ambulance: "Ambulance",
+  route: "Coming in themselves",
+  desk: "Report to the desk",
+};
+
+const STEP_ORDER = ["sent", "accepted", "on_the_way", "arrived"];
+
+function ageMinutes(value) {
+  const minutes = Math.floor((Date.now() - new Date(value).getTime()) / 60000);
+  return !value || Number.isNaN(minutes) ? 0 : Math.max(0, minutes);
+}
+
+function mapsHref(item) {
+  if (item.whereLat == null || item.whereLng == null) return "";
+  return `https://www.google.com/maps?q=${item.whereLat},${item.whereLng}`;
+}
+
+function StepRail({ state }) {
+  const at = STEP_ORDER.indexOf(state);
+  return (
+    <span className="pd-rail" aria-label={STATE_LABEL[state] || state}>
+      {STEP_ORDER.map((id, index) => (
+        <i key={id} className={index < at ? "done" : index === at ? "now" : ""} />
+      ))}
+    </span>
+  );
+}
 
 function stateClass(state) {
   if (state === "sent") return "warn";
@@ -688,18 +717,18 @@ function PartnerLogin() {
           ]}
         />
         <div className="form-side">
-          <Field label="Official email">
+          <Field label="Official email or the representative's email">
             <Inp icon="mail" type="email" name="username" autoComplete="username" value={email} placeholder="name@organisation.ug" onChange={setEmail} />
           </Field>
           <Field label="Partner code" error={error}>
             <Inp icon="lock" type="password" mode="numeric" name="password" autoComplete="current-password" value={code} placeholder="8 digits" onChange={setCode} />
           </Field>
-          <Note icon="lock">The code arrives once the AfriResQ team confirms your organisation. Still waiting? It has not been confirmed yet.</Note>
+          <Note icon="lock">Use the email that received the code, and the 8-digit code itself. The code arrives only after AfriResQ confirms the organisation.</Note>
           <button type="button" className="link left" onClick={() => go("partnerJoin")}>Not a partner yet? Ask to join</button>
         </div>
       </div>
       <div className="foot">
-        <Btn disabled={busy || !email.includes("@") || code.replace(/\s/g, "").length < 8} onClick={submit}>{busy ? "Checking…" : "Sign in"}</Btn>
+        <Btn disabled={busy || !email.includes("@") || code.replace(/\D/g, "").length < 8} onClick={submit}>{busy ? "Checking…" : "Sign in"}</Btn>
       </div>
     </Screen>
   );
@@ -722,9 +751,9 @@ function profileDraft(partner) {
 }
 
 const AVAILABILITY_HINT = {
-  available: "Ready to take requests",
-  busy: "Taking only urgent requests",
-  unavailable: "Not taking requests",
+  available: "New requests can be sent to you",
+  busy: "Urgent requests can still be sent to you",
+  unavailable: "New requests are not sent to you",
 };
 
 const SECTIONS = [
@@ -799,20 +828,26 @@ function useArrivalAlert(cases, showToast) {
 function RequestCard({ item, busy, onAccept, onDecline, onOpen }) {
   const [declining, setDeclining] = useState(false);
   const person = item.person || {};
+  const late = ageMinutes(item.createdAt) >= 10;
+  const phone = String(person.phone || "").replace(/\D/g, "").replace(/^0/, "");
+  const map = mapsHref(item);
   return (
-    <article className="pd-req">
+    <article className={`pd-req${late ? " late" : ""}`}>
       <div className="pd-req-top">
         <span className="pd-pulse" aria-hidden="true" />
-        <span className="bd warn">New request</span>
+        <span className="bd warn">{late ? "Waiting" : "New request"}</span>
         <b>{item.id}</b>
-        <small>{waited(item.createdAt)}</small>
+        <small>{late ? `${ageMinutes(item.createdAt)} min` : waited(item.createdAt)}</small>
       </div>
-      <h4>{item.what}</h4>
+      <button type="button" className="pd-req-title" onClick={() => onOpen(item)}>
+        <h4>{item.what}</h4>
+        <Icon n="chevR" c="s" />
+      </button>
       <div className="pd-req-facts">
         <span><Icon n="user" c="s" />{person.name || "Unknown person"}{item.who && item.who !== "me" ? " · for someone else" : ""}</span>
         <span><Icon n="pin" c="s" />{item.whereText || "Location sent with the case"}</span>
+        {PATH_SHORT[item.path] ? <span><Icon n="amb" c="s" />{PATH_SHORT[item.path]}</span> : null}
         {item.awake ? <span><Icon n="heart" c="s" />Awake: {item.awake}</span> : null}
-        {person.phone ? <a href={`tel:+256${String(person.phone).replace(/\D/g, "").replace(/^0/, "")}`}><Icon n="phone" c="s" />+256 {person.phone}</a> : null}
       </div>
       {item.detail ? <p className="pd-req-detail">{item.detail}</p> : null}
       {declining ? (
@@ -821,7 +856,8 @@ function RequestCard({ item, busy, onAccept, onDecline, onOpen }) {
         <div className="pd-req-actions">
           <Btn disabled={busy} onClick={() => onAccept(item)}><Icon n="check" c="m" />Accept</Btn>
           <Btn tone="out" disabled={busy} onClick={() => setDeclining(true)}>Decline</Btn>
-          <button type="button" className="link" onClick={() => onOpen(item)}>Full details</button>
+          {phone ? <a className="btn out sm pd-call" href={`tel:+256${phone}`}><Icon n="phone" c="m" />Call</a> : null}
+          {map ? <a className="btn out sm pd-call" href={map} target="_blank" rel="noreferrer"><Icon n="pin" c="m" />Map</a> : null}
         </div>
       )}
     </article>
@@ -830,7 +866,7 @@ function RequestCard({ item, busy, onAccept, onDecline, onOpen }) {
 
 // The live case board. Desks and partners share it: new requests to accept or decline, work in progress
 // moved one step at a time, and finished cases.
-function CaseBoard({ deskKey, placeId, placeName, stats, getToken, onSignedOut }) {
+function CaseBoard({ deskKey, placeId, placeName, stats, availability, getToken, onSignedOut, onWaiting }) {
   const { go, setPartnerDesk, setPartnerCaseId, showToast } = useApp();
   const [view, setView] = useState("active");
   const [cases, setCases] = useState(null);
@@ -838,7 +874,13 @@ function CaseBoard({ deskKey, placeId, placeName, stats, getToken, onSignedOut }
   const [error, setError] = useState("");
   const [busy, setBusy] = useState("");
   const [tick, setTick] = useState(0);
+  const [clock, setClock] = useState(0);
   useArrivalAlert(cases, showToast);
+
+  useEffect(() => {
+    const id = setInterval(() => setClock((value) => value + 1), 30000);
+    return () => clearInterval(id);
+  }, []);
 
   useEffect(() => {
     let stop = false;
@@ -892,103 +934,122 @@ function CaseBoard({ deskKey, placeId, placeName, stats, getToken, onSignedOut }
   const s = stats || {};
   const incoming = (cases || []).filter((item) => item.state === "sent");
   const working = (cases || []).filter((item) => item.state !== "sent");
+  useEffect(() => {
+    if (cases) onWaiting?.(incoming.length);
+  }, [cases, clock]);
+  const statusNote = availability === "unavailable"
+    ? "You are unavailable, so new requests are not sent to you. Cases already here stay until you finish them."
+    : availability === "busy"
+      ? "You are busy. Urgent requests can still be sent here."
+      : availability === "offline"
+        ? "You are offline, so new requests are not sent to you. Choose Available when you can take them."
+        : "";
   return (
     <>
-      <SectionHead title="Cases" sub={`Requests sent to ${placeName}`}>
+      <SectionHead title="Cases" sub={incoming.length ? `${incoming.length} waiting for ${placeName}` : `Requests sent to ${placeName}`}>
         <div className="appear-set pd-mini-seg">
-          <button type="button" className={view === "active" ? "on" : ""} onClick={() => setView("active")}>Active</button>
+          <button type="button" className={view === "active" ? "on" : ""} onClick={() => setView("active")}>Active{incoming.length ? ` ${incoming.length}` : ""}</button>
           <button type="button" className={view === "finished" ? "on" : ""} onClick={() => setView("finished")}>Finished</button>
         </div>
       </SectionHead>
-      <div className="pd-stats">
-        <Stat label="New" value={incoming.length} note="Waiting for you" tone={incoming.length ? "warn" : ""} />
-        <Stat label="In progress" value={working.length} note="Accepted by you" tone="ok" />
-        <Stat label="Closed today" value={s.closed_today} note={`${s.closed_week ?? 0} this week · ${s.declined_week ?? 0} declined`} />
-        <Stat label="Rating" value={s.rating == null ? "—" : s.rating} note={s.rating == null ? "No ratings yet" : "Out of 5"} />
-      </div>
+      {statusNote ? <Note tone={availability === "unavailable" ? "gold" : ""} icon="info">{statusNote}</Note> : null}
       {error ? <Note tone="red" icon="alert">{error}</Note> : null}
 
-      {view === "active" ? (
-        <>
-          <div className="pd-group-head">
-            <b>New requests</b>
-            {incoming.length ? <span className="bd warn">{incoming.length} waiting</span> : null}
-          </div>
-          {incoming.length ? (
-            <div className="pd-reqs">
-              {incoming.map((item) => (
-                <RequestCard
-                  key={item.id}
-                  item={item}
-                  busy={busy === item.id}
-                  onOpen={open}
-                  onAccept={(row) => move(row, { state: "accepted" }, `${row.id} accepted. The person can see it.`)}
-                  onDecline={(row, reason) => move(row, { state: "declined", reason }, `${row.id} declined. The person has been told.`)}
-                />
-              ))}
-            </div>
-          ) : (
-            <div className="pd-card pd-empty">
-              <Icon n="bell" c="l" />
-              <b>No new requests</b>
-              <small>New requests appear here with a sound. Keep this page open.</small>
-            </div>
-          )}
-
-          <div className="pd-group-head"><b>In progress</b></div>
-          {working.length ? (
-            <div className="pd-card pd-rows">
-              {working.map((item) => {
-                const next = NEXT[item.state];
-                return (
-                  <div className="pd-row" key={item.id}>
-                    <button type="button" className="pd-row-main" onClick={() => open(item)}>
-                      <span className={`bd ${stateClass(item.state)}`}>{STATE_LABEL[item.state]}</span>
-                      <span className="t">
-                        <b>{item.id}<span> · {item.what}</span></b>
-                        <small>{item.person?.name || "Unknown person"} · {item.whereText || "Location sent with the case"}</small>
-                      </span>
-                    </button>
-                    {next ? (
-                      <button type="button" className="btn pri sm" disabled={busy === item.id} onClick={() => move(item, { state: next[0] }, `${item.id}: ${STATE_LABEL[next[0]].toLowerCase()}`)}>
-                        {busy === item.id ? "Saving…" : next[1]}
-                      </button>
-                    ) : null}
-                  </div>
-                );
-              })}
-            </div>
-          ) : (
-            <p className="pd-fine">Requests you accept move here. Mark each step so the person can follow along.</p>
-          )}
-        </>
-      ) : (
-        <div className="pd-card pd-rows">
-          {finished.length ? finished.map((item) => (
-            <div className="pd-row" key={item.id}>
-              <button type="button" className="pd-row-main" onClick={() => open(item)}>
-                <span className={`bd ${stateClass(item.state)}`}>{STATE_LABEL[item.state] || item.state}</span>
-                <span className="t">
-                  <b>{item.id}<span> · {item.what}</span></b>
-                  <small>{item.person?.name || "Unknown person"} · {item.state === "declined" ? `Declined: ${item.declineReason || "no reason"}` : waited(item.updatedAt)}{item.rating ? ` · rated ${item.rating}/5` : ""}</small>
-                </span>
-              </button>
-            </div>
-          )) : (
-            <div className="pd-empty">
-              <Icon n="check" c="l" />
-              <b>Nothing finished yet</b>
-              <small>Closed, declined, and cancelled requests gather here.</small>
-            </div>
-          )}
+      <div className="pd-board">
+        <div className="pd-stats">
+          <Stat label="New" value={cases ? incoming.length : "—"} note="Waiting for you" tone={incoming.length ? "warn" : ""} />
+          <Stat label="In progress" value={cases ? working.length : "—"} note="Accepted by you" tone="ok" />
+          <Stat label="Closed today" value={s.closed_today} note={`${s.closed_week ?? 0} this week · ${s.declined_week ?? 0} declined`} />
+          <Stat label="Rating" value={s.rating == null ? "—" : s.rating} note={s.rating == null ? "No ratings yet" : "Out of 5"} />
         </div>
-      )}
+
+        {view === "active" ? (
+          <>
+            <div className="pd-queue">
+              <div className="pd-group-head">
+                <b>New requests</b>
+                {incoming.length ? <span className="bd warn">{incoming.length} waiting</span> : null}
+              </div>
+              {incoming.length ? (
+                <div className="pd-reqs">
+                  {incoming.map((item) => (
+                    <RequestCard
+                      key={item.id}
+                      item={item}
+                      busy={busy === item.id}
+                      onOpen={open}
+                      onAccept={(row) => move(row, { state: "accepted" }, `${row.id} accepted. The person can see it.`)}
+                      onDecline={(row, reason) => move(row, { state: "declined", reason }, `${row.id} declined. The person has been told.`)}
+                    />
+                  ))}
+                </div>
+              ) : (
+                <div className="pd-card pd-empty">
+                  <Icon n="bell" c="l" />
+                  <b>No new requests</b>
+                  <small>New requests appear here with a sound. Keep this page open.</small>
+                </div>
+              )}
+            </div>
+
+            <div className="pd-working">
+              <div className="pd-group-head"><b>In progress</b></div>
+              {working.length ? (
+                <div className="pd-card pd-rows">
+                  {working.map((item) => {
+                    const next = NEXT[item.state];
+                    return (
+                      <div className="pd-row" key={item.id}>
+                        <button type="button" className="pd-row-main" onClick={() => open(item)}>
+                          <span className={`bd ${stateClass(item.state)}`}>{STATE_LABEL[item.state]}</span>
+                          <span className="t">
+                            <b>{item.id}<span> · {item.what}</span></b>
+                            <small>{item.person?.name || "Unknown person"} · {item.whereText || "Location sent with the case"}</small>
+                          </span>
+                          <StepRail state={item.state} />
+                        </button>
+                        {next ? (
+                          <button type="button" className="btn pri sm" disabled={busy === item.id} onClick={() => move(item, { state: next[0] }, `${item.id}: ${STATE_LABEL[next[0]].toLowerCase()}`)}>
+                            {busy === item.id ? "Saving…" : next[1]}
+                          </button>
+                        ) : null}
+                      </div>
+                    );
+                  })}
+                </div>
+              ) : (
+                <p className="pd-fine">Requests you accept move here. Mark each step so the person can follow along.</p>
+              )}
+            </div>
+          </>
+        ) : (
+          <div className="pd-card pd-rows">
+            {finished.length ? finished.map((item) => (
+              <div className="pd-row" key={item.id}>
+                <button type="button" className="pd-row-main" onClick={() => open(item)}>
+                  <span className={`bd ${stateClass(item.state)}`}>{STATE_LABEL[item.state] || item.state}</span>
+                  <span className="t">
+                    <b>{item.id}<span> · {item.what}</span></b>
+                    <small>{item.person?.name || "Unknown person"} · {item.state === "declined" ? `Declined: ${item.declineReason || "no reason"}` : waited(item.updatedAt)}{item.rating ? ` · rated ${item.rating}/5` : ""}</small>
+                  </span>
+                </button>
+              </div>
+            )) : (
+              <div className="pd-empty">
+                <Icon n="check" c="l" />
+                <b>Nothing finished yet</b>
+                <small>Closed, declined, and cancelled requests gather here.</small>
+              </div>
+            )}
+          </div>
+        )}
+      </div>
     </>
   );
 }
 
 
-function PartnerCases({ partner, onSignedOut }) {
+function PartnerCases({ partner, onSignedOut, onWaiting }) {
   if (partner.placeId && !partner.placeActive) {
     return (
       <>
@@ -1042,8 +1103,10 @@ function PartnerCases({ partner, onSignedOut }) {
       placeId={partner.placeId}
       placeName={partner.placeName}
       stats={partner.stats}
+      availability={partner.availability}
       getToken={() => readPartnerSession()?.token}
       onSignedOut={onSignedOut}
+      onWaiting={onWaiting}
     />
   );
 }
@@ -1347,6 +1410,8 @@ function PartnerHome() {
   const [tab, setTab] = useState("cases");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
+  const [liveWaiting, setLiveWaiting] = useState(null);
+  const onWaiting = useCallback((count) => setLiveWaiting(count), []);
 
   function signedOut() {
     clearPartnerSession();
@@ -1404,10 +1469,14 @@ function PartnerHome() {
   }
 
   const name = partner?.organisation || readPartnerSession()?.organisation || "Partner";
-  const waiting = partner?.stats?.waiting || 0;
+  const waiting = liveWaiting ?? partner?.stats?.waiting ?? 0;
+  const statusLabel = AVAILABILITY.find(([id]) => id === partner?.availability)?.[1] || "";
+  const sub = partner
+    ? [statusLabel || "Status not set", partner.placeName || partner.primaryCategory].filter(Boolean).join(" · ")
+    : "Partner dashboard";
   return (
     <Screen>
-      <DeskBar title={name} sub="Partner dashboard" onBack={() => go("welcome", null, true)} />
+      <DeskBar title={name} sub={sub} onBack={() => go("welcome", null, true)} />
       <div className="body partner-board">
         <div className="pd">
           <aside className="pd-side">
@@ -1440,7 +1509,8 @@ function PartnerHome() {
                     {partner.availability === id ? <Icon n="check" c="s" /> : null}
                   </button>
                 ))}
-                {partner.availability === "offline" ? <p className="pd-fine">Choose a status so the team knows if you can take requests.</p> : null}
+                <p className="pd-fine pd-status-now">{partner.availability === "offline" ? "Choose Available before new requests are sent to you." : AVAILABILITY_HINT[partner.availability]}</p>
+                {partner.availability === "offline" ? <p className="pd-fine pd-status-desk">Choose Available before new requests are sent to you.</p> : null}
               </div>
             ) : null}
 
@@ -1462,7 +1532,7 @@ function PartnerHome() {
             {error ? <Note tone="red" icon="alert">{error}</Note> : null}
             {partner ? (
               <>
-                {tab === "cases" ? <PartnerCases partner={partner} onSignedOut={signedOut} /> : null}
+                {tab === "cases" ? <PartnerCases partner={partner} onSignedOut={signedOut} onWaiting={onWaiting} /> : null}
                 {tab === "announcements" ? <PartnerAnnouncements onSignedOut={signedOut} /> : null}
                 {tab === "profile" ? <PartnerProfile key={partner.id} partner={partner} onSaved={keep} onSignedOut={signedOut} /> : null}
                 {tab === "account" ? <PartnerAccount partner={partner} onLeave={() => go("welcome", null, true)} /> : null}

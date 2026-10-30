@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { findPerson, isStudentEmail, loginWithPassword, requestOtp, saveLastPlace, savePerson, studentHost, verifyOtp } from "./account-api.js";
 import { AppState } from "./app-state.js";
-import { createCase, getCase, listMyCases, updateCase } from "./case-api.js";
+import { createCase, CaseSendError, getCase, listMyCases, updateCase } from "./case-api.js";
+import { dropQueued, enqueueCase, listPending, localCase, newClientRef, startOutbox } from "./outbox.js";
 import { readFix } from "./locate.js";
 import { PLACES } from "./map.js";
 import { listPlaces } from "./places-api.js";
@@ -160,9 +161,19 @@ export default function App() {
   useEffect(() => {
     if (!profileDone || !authToken || !user.phone || caseRef.current) return undefined;
     let ignore = false;
-    listMyCases(user.phone, authToken)
+    listPending()
+      .then((pending) => {
+        if (ignore || caseRef.current || !pending[0]) return null;
+        const local = localCase(pending[0]);
+        caseRef.current = local;
+        setKase(local);
+        if (local.place) setPlace(local.place);
+        if (local.kind === "other" && local.otherType) setOtherType(local.otherType);
+        return pending;
+      })
+      .then(() => listMyCases(user.phone, authToken))
       .then((rows) => {
-        if (ignore || caseRef.current) return;
+        if (ignore || caseRef.current?.queued) return;
         const recent = (row) => Date.now() - new Date(row.updatedAt || row.createdAt).getTime() < 6 * 3600 * 1000;
         const live = rows.find((row) => ["sent", "accepted", "on_the_way", "arrived"].includes(row.state) || (row.state === "declined" && recent(row)));
         if (!live) return;
@@ -262,6 +273,24 @@ export default function App() {
   }
 
   const caseRef = useRef(null);
+  const sendingRef = useRef(false);
+  useEffect(() => {
+    return startOutbox({
+      onSent(saved) {
+        if (caseRef.current?.clientRef !== saved.clientRef) return;
+        caseRef.current = saved;
+        setKase(saved);
+        showToast("Your request reached AfriResQ.");
+      },
+      onGiveUp(item, message) {
+        if (caseRef.current?.clientRef === item.clientRef) {
+          caseRef.current = null;
+          setKase(null);
+        }
+        showToast(message || "The request could not be sent. Call 999 or 112 if someone needs help now.");
+      },
+    });
+  }, [showToast]);
   const stackRef = useRef(stack);
   const screenRef = useRef(screen);
   const placeRef = useRef(place);
@@ -661,6 +690,7 @@ export default function App() {
       go("welcome", null, true);
     },
     async beginCase(fields) {
+      if (sendingRef.current) return false;
       const phoneDigits = (user.phone || "").replace(/\D/g, "");
       if (phoneDigits.length < 9) {
         showToast("Add a phone number on your profile before sending a case.");
@@ -682,37 +712,62 @@ export default function App() {
         : report.where === "written"
           ? { whereText: [report.building, report.room, report.landmark].filter(Boolean).join(", "), whereLat: null, whereLng: null }
           : { whereText: `Live location, about ${point.accuracy} m`, whereLat: point.lat, whereLng: point.lng };
+      const payload = {
+        clientRef: newClientRef(),
+        phone: user.phone,
+        kind: fields.kind || "medical",
+        what: fields.what || report.what,
+        awake: report.awake,
+        who: report.who,
+        whereMode: report.where,
+        ...where,
+        building: report.building,
+        room: report.room,
+        landmark: report.landmark,
+        placeId,
+        desk: fields.desk || places[placeId]?.name || "",
+        path: fields.path,
+        otherType: fields.otherType || "",
+        detail: fields.detail || "",
+        state: fields.state || "sent",
+      };
+      sendingRef.current = true;
       try {
-        await savePerson(user, profileDone, safety, authToken);
-        const saved = await createCase({
-          phone: user.phone,
-          kind: fields.kind || "medical",
-          what: fields.what || report.what,
-          awake: report.awake,
-          who: report.who,
-          whereMode: report.where,
-          ...where,
-          building: report.building,
-          room: report.room,
-          landmark: report.landmark,
-          placeId,
-          desk: fields.desk || places[placeId]?.name || "",
-          path: fields.path,
-          otherType: fields.otherType || "",
-          detail: fields.detail || "",
-          state: fields.state || "sent",
-        }, authToken);
+        try {
+          await savePerson(user, profileDone, safety, authToken);
+        } catch (err) {
+          if (!(err instanceof TypeError)) throw err;
+        }
+        const saved = await createCase(payload, authToken);
         caseRef.current = saved;
         setKase(saved);
         return true;
       } catch (err) {
-        showToast(err.message || "The case could not be saved.");
-        return false;
+        const offline = err instanceof CaseSendError ? err.retry : err instanceof TypeError;
+        if (!offline) {
+          showToast(err.message || "The case could not be saved.");
+          return false;
+        }
+        const item = await enqueueCase(payload);
+        const local = localCase(item);
+        caseRef.current = local;
+        setKase(local);
+        showToast("Saved on this phone. AfriResQ will send it when the network returns.");
+        return true;
+      } finally {
+        sendingRef.current = false;
       }
     },
     async moveCase(patch) {
       const current = caseRef.current;
       if (!current?.id) return false;
+      if (current.queued) {
+        if (patch.state !== "cancelled") return false;
+        await dropQueued(current.clientRef);
+        caseRef.current = null;
+        setKase(null);
+        return true;
+      }
       try {
         const saved = await updateCase(current.id, patch, authToken);
         caseRef.current = saved;
@@ -728,6 +783,7 @@ export default function App() {
       setKase(null);
     },
     async refreshCase() {
+      if (caseRef.current?.queued) return caseRef.current;
       const id = caseRef.current?.id;
       if (!id) return null;
       try {

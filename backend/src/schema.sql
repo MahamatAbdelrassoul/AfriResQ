@@ -237,6 +237,12 @@ begin
 end $$;
 alter table cases add column if not exists decline_reason text not null default '';
 
+-- The phone makes this up before the network answers, so a retry of the same alert is the same case.
+alter table cases add column if not exists client_ref text;
+create unique index if not exists cases_client_ref_unique
+  on cases (client_ref)
+  where client_ref is not null;
+
 -- Where the partner is based, given on the join form. Confirming the partner puts its place there.
 alter table partner_applications add column if not exists applicant_kind text not null default 'organisation';
 alter table partner_applications add column if not exists city text not null default '';

@@ -1,3 +1,5 @@
+import { apiUrl } from "./api.js";
+
 const KEY = "afriresq-admin";
 
 export function readSession() {
@@ -16,7 +18,7 @@ export async function teamCall(token, path, { method = "GET", body } = {}) {
   const headers = {};
   if (token) headers.Authorization = `Bearer ${token}`;
   if (body !== undefined) headers["Content-Type"] = "application/json";
-  const res = await fetch(`/api/admin${path}`, {
+  const res = await fetch(apiUrl(`/api/admin${path}`), {
     method,
     headers,
     body: body === undefined ? undefined : JSON.stringify(body),

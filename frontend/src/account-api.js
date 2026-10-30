@@ -1,3 +1,5 @@
+import { apiUrl } from "./api.js";
+
 export function studentHost(domain = "mak.ac.ug") {
   const host = String(domain || "").replace(/^@/, "").trim().toLowerCase();
   if (host.startsWith("students.")) return host;
@@ -11,7 +13,7 @@ export function isStudentEmail(value, domain = "mak.ac.ug") {
 }
 
 export async function requestOtp(payload) {
-  const res = await fetch("/api/auth/otp", {
+  const res = await fetch(apiUrl("/api/auth/otp"), {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload),
@@ -22,7 +24,7 @@ export async function requestOtp(payload) {
 }
 
 export async function verifyOtp(payload) {
-  const res = await fetch("/api/auth/otp/verify", {
+  const res = await fetch(apiUrl("/api/auth/otp/verify"), {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload),
@@ -33,7 +35,7 @@ export async function verifyOtp(payload) {
 }
 
 export async function loginWithPassword(payload) {
-  const res = await fetch("/api/auth/login", {
+  const res = await fetch(apiUrl("/api/auth/login"), {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload),
@@ -44,7 +46,7 @@ export async function loginWithPassword(payload) {
 }
 
 export async function savePerson(user, profileDone, safety, token, password) {
-  const res = await fetch("/api/people", {
+  const res = await fetch(apiUrl("/api/people"), {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -75,7 +77,7 @@ export async function findPerson({ phone, email }, token) {
   const params = new URLSearchParams();
   if (phone) params.set("phone", phone);
   if (email) params.set("email", email);
-  const res = await fetch(`/api/people?${params}`, {
+  const res = await fetch(apiUrl(`/api/people?${params}`), {
     headers: token ? { Authorization: `Bearer ${token}` } : {},
   });
   if (res.status === 404) return null;

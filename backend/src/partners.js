@@ -32,7 +32,10 @@ export async function issuePartnerCode(pool, id) {
   if (!row) return null;
   await pool.query("delete from partner_sessions where partner_id = $1", [id]);
 
-  const message = `${row.organisation} is confirmed on AfriResQ. Sign in to the partner dashboard with ${row.email} and this code: ${code}. Keep it private.`;
+  const also = row.representative_email && row.representative_email.toLowerCase() !== row.email.toLowerCase()
+    ? ` or ${row.representative_email.trim().toLowerCase()}`
+    : "";
+  const message = `${row.organisation} is confirmed on AfriResQ. Sign in with ${row.email}${also} and this code: ${code}. Then set your status to Available. New requests are not sent until you do. Keep the code private.`;
   const sentTo = [];
   const emails = [...new Set([row.email, row.representative_email].map((item) => item.trim().toLowerCase()).filter(Boolean))];
   for (const email of emails) {
@@ -71,6 +74,18 @@ const PLACE_KIND = {
   "Gas, fuel and energy emergencies": "fire",
   "Electricity and power emergencies": "fire",
   "Building and structural emergencies": "fire",
+  "Road traffic and accident response": "police",
+  "Specialised rescue and public safety": "disaster",
+  "Disaster management and humanitarian response": "disaster",
+  "Roadside assistance and vehicle recovery": "disaster",
+  "Water and sanitation emergencies": "disaster",
+  "Telecommunications and digital infrastructure": "disaster",
+  "Public works and transport infrastructure": "disaster",
+  "Marine and waterway emergency services": "disaster",
+  "Emergency social support": "disaster",
+  "Emergency transport and evacuation": "disaster",
+  "Emergency coordination and volunteer organisations": "disaster",
+  "Specialist and other emergency providers": "disaster",
 };
 const AMBULANCE = "Ambulance and emergency medical services";
 const AMBULANCE_MINUTES = 10;
@@ -106,6 +121,29 @@ async function geocode(row) {
   }
 }
 
+// Used when Google has no key or refuses the lookup. One search per confirmation, and only a point inside Uganda is kept.
+async function geocodeOpen(row) {
+  const address = [row.address, row.city, row.districts, "Uganda"].filter(Boolean).join(", ");
+  if (!row.address && !row.city && !row.districts) return null;
+  try {
+    const res = await fetch(
+      `https://nominatim.openstreetmap.org/search?format=jsonv2&limit=1&countrycodes=ug&q=${encodeURIComponent(address)}`,
+      {
+        headers: { "User-Agent": "AfriResQ/1.0 (partner place lookup)", Accept: "application/json" },
+        signal: AbortSignal.timeout(8000),
+      },
+    );
+    const body = res.ok ? await res.json() : [];
+    const lat = Number(body[0]?.lat);
+    const lng = Number(body[0]?.lon);
+    const inside = lat >= -1.6 && lat <= 4.3 && lng >= 29.5 && lng <= 35.1;
+    return inside ? { lat, lng } : null;
+  } catch (err) {
+    console.error("Address lookup did not answer:", err.message);
+    return null;
+  }
+}
+
 async function freePlaceId(pool, organisation) {
   const base = String(organisation || "").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 16).replace(/-+$/, "") || "partner";
   const stem = base.length < 2 ? `partner-${base}` : base;
@@ -128,7 +166,7 @@ export async function partnerLocation(pool, id, override = {}) {
   if (row.base_lat != null && inRange(Number(row.base_lat), Number(row.base_lng))) {
     return { lat: Number(row.base_lat), lng: Number(row.base_lng), source: "request" };
   }
-  const looked = await geocode(row);
+  const looked = (await geocode(row)) || (await geocodeOpen(row));
   return looked ? { ...looked, source: "address" } : null;
 }
 
@@ -158,7 +196,7 @@ export async function ensurePartnerPlace(pool, id, location) {
       PLACE_KIND[row.primary_category] || "disaster",
       row.organisation.slice(0, 160),
       row.organisation.slice(0, 40),
-      row.phone ? `+256 ${row.phone.replace(/^\+?256\s*/, "")}` : "",
+      placePhone(row),
       location.lat,
       location.lng,
       categories.includes(AMBULANCE) ? AMBULANCE_MINUTES : null,
@@ -169,6 +207,31 @@ export async function ensurePartnerPlace(pool, id, location) {
     [id, placeId, location.lat, location.lng],
   );
   return { placeId, created: true };
+}
+
+// A mobile is stored as 07…, which the desk texts can use. A landline is kept for the call button.
+// A placeholder of zeros is dropped. The representative's mobile is used when the organisation line is not callable.
+export function placePhone(row) {
+  const dial = (value) => {
+    const mobile = ugandaPhone(value);
+    if (mobile) return mobile.local;
+    const digits = String(value || "").replace(/\D/g, "");
+    if (digits.length < 9 || /^0+$/.test(digits) || /^2560{5,}/.test(digits) || /^0{5,}/.test(digits)) return "";
+    return digits.startsWith("256") ? `+${digits}` : digits;
+  };
+  return dial(row?.phone) || dial(row?.representative_phone);
+}
+
+// Built-in desks have no partner row and stay open. A partner receives new work only while available or busy.
+export async function partnerTaking(pool, placeId) {
+  if (!placeId) return true;
+  const found = await pool.query(
+    "select availability from partner_applications where place_id = $1 and status = 'approved'",
+    [placeId],
+  );
+  const status = found.rows[0]?.availability;
+  if (!status) return true;
+  return status === "available" || status === "busy";
 }
 
 // Waiting again or declined: the code and every session stop working, and the place stops receiving.
@@ -257,6 +320,13 @@ function clean(value, max) {
   return String(value || "").trim().slice(0, max);
 }
 
+// Empty is missing. A value that is not an email address is invalid, so the code has somewhere to go.
+function emailOf(value) {
+  const email = clean(value, 160).toLowerCase();
+  if (!email) return "";
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) ? email : null;
+}
+
 export function partnerRouter(pool) {
   const router = Router();
 
@@ -272,7 +342,7 @@ export function partnerRouter(pool) {
       ? [...new Set(body.extraCategories.map((item) => clean(item, 120)).filter((item) => item && item !== primary && CATEGORIES.has(item)))]
       : [];
     const phone = clean(body.phone, 40);
-    const email = clean(body.email, 160);
+    const email = emailOf(body.email);
     const address = clean(body.address, 240);
     const districts = clean(body.districts, 240);
     const services = clean(body.services, 500);
@@ -280,17 +350,26 @@ export function partnerRouter(pool) {
     const licence = clean(body.licence, 240);
     const representativeName = clean(body.representativeName, 160);
     const representativePhone = clean(body.representativePhone, 40);
-    const representativeEmail = clean(body.representativeEmail, 160);
+    const representativeEmail = emailOf(body.representativeEmail);
     const baseLat = Number(body.baseLat);
     const baseLng = Number(body.baseLng);
     const hasBase = body.baseLat != null && body.baseLat !== "" && body.baseLng != null && body.baseLng !== ""
       && inRange(baseLat, baseLng);
-    if (!organisation || !phone || !email || !address || !representativeName || !representativePhone || (university ? !city || !domainOk : !CATEGORIES.has(primary))) {
-      res.status(400).json({
-        error: university
-          ? "Fill in the university, the city, the student email domain, the phone, the email, the address, and the person who can speak for it."
-          : "Fill in the organisation, the main service, the phone, the email, the address, and the person who can speak for it.",
-      });
+    const who = university ? "university" : "organisation";
+    if (!organisation || !phone || !email || !address || !representativeName || !representativePhone || representativeEmail === null || (university ? !city || !domainOk : !primary || !CATEGORIES.has(primary))) {
+      const error = !organisation ? `Enter the ${who}'s name.`
+        : university && !city ? "Enter the city."
+        : university && !domainOk ? "Enter the student email domain, such as students.kyu.ac.ug."
+        : !primary ? "Choose the main service."
+        : !university && !CATEGORIES.has(primary) ? "Choose a service from the list."
+        : !phone ? `Enter the ${who}'s telephone.`
+        : email === null ? "Enter a real official email, such as name@organisation.ug."
+        : !email ? "Enter the official email. The sign-in code is sent there."
+        : !address ? (university ? "Enter the campus address, so AfriResQ can find it." : "Enter the physical address, so AfriResQ can find the base.")
+        : !representativeName ? `Enter the name of the person who can speak for the ${who}.`
+        : !representativePhone ? "Enter that person's telephone."
+        : "Enter a real email for that person, or leave it blank.";
+      res.status(400).json({ error });
       return;
     }
     const announcementName = university ? clean(body.announcementName, 80) : "";
@@ -348,15 +427,16 @@ export function partnerRouter(pool) {
 
   router.post("/session", async (req, res) => {
     const email = clean(req.body?.email, 160).toLowerCase();
-    const code = String(req.body?.code || "").replace(/\s/g, "");
-    if (!email || !code) {
-      res.status(400).json({ error: "Enter the official email and the code AfriResQ sent." });
+    const code = String(req.body?.code || "").replace(/\D/g, "");
+    if (!email || code.length < 8) {
+      res.status(400).json({ error: "Enter the email the code was sent to, and the 8-digit code." });
       return;
     }
     try {
+      // The code is sent to the official inbox and the representative's inbox, so either address can sign in.
       const found = await pool.query(
         `select * from partner_applications
-         where lower(email) = $1 and status = 'approved' and access_code_hash <> ''
+         where lower(email) = $1 or lower(representative_email) = $1
          order by updated_at desc limit 5`,
         [email],
       );
@@ -364,7 +444,20 @@ export function partnerRouter(pool) {
         res.status(401).json({ error: "That email or code is not right." });
         return;
       }
-      const open = found.rows.filter((row) => !row.locked_until || new Date(row.locked_until) <= new Date());
+      const ready = found.rows.filter((row) => row.status === "approved" && row.access_code_hash);
+      if (!ready.length) {
+        const waiting = found.rows.some((row) => row.status === "pending");
+        const declined = found.rows.some((row) => row.status === "declined");
+        res.status(403).json({
+          error: waiting
+            ? "AfriResQ has not confirmed this organisation yet. The sign-in code arrives after it is confirmed."
+            : declined
+              ? "This request was declined. Ask AfriResQ if the organisation should apply again."
+              : "Ask AfriResQ to send a new sign-in code.",
+        });
+        return;
+      }
+      const open = ready.filter((row) => !row.locked_until || new Date(row.locked_until) <= new Date());
       if (!open.length) {
         res.status(429).json({ error: "Too many wrong codes. Wait 15 minutes, or ask AfriResQ for a new code." });
         return;
@@ -388,6 +481,9 @@ export function partnerRouter(pool) {
          values ($1, $2, now() + interval '${SESSION_TTL}')`,
         [tokenHash(token), row.id],
       );
+      if (!row.place_id && row.base_lat != null && inRange(Number(row.base_lat), Number(row.base_lng))) {
+        await ensurePartnerPlace(pool, row.id, { lat: Number(row.base_lat), lng: Number(row.base_lng) });
+      }
       res.json({ token, partner: await dashboard(pool, row.id) });
     } catch {
       res.status(503).json({ error: "The database is not available." });
@@ -453,6 +549,16 @@ export function partnerRouter(pool) {
           "insert into admin_log (action, target, detail) values ($1, $2, $3)",
           ["Partner changed its details", saved.rows[0].organisation, details.join(", ")],
         );
+      }
+      if (body.phone !== undefined || body.representativePhone !== undefined) {
+        const fresh = await pool.query(
+          "select phone, representative_phone, place_id from partner_applications where id = $1",
+          [row.id],
+        );
+        const phone = placePhone(fresh.rows[0]);
+        if (fresh.rows[0]?.place_id && phone) {
+          await pool.query("update places set phone = $2 where id = $1", [fresh.rows[0].place_id, phone]);
+        }
       }
       res.json(await dashboard(pool, row.id));
     } catch {

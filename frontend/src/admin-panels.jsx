@@ -574,7 +574,7 @@ export function PartnersPanel({ token, applications, places, act, busy }) {
                   {item.licence ? <small>Licence: {item.licence}</small> : null}
                   <small>Contact: {item.representativeName} · {item.representativePhone}{item.representativeEmail ? ` · ${item.representativeEmail}` : ""}</small>
                   <small>Asked {ago(item.createdAt)}</small>
-                  {item.status === "approved" ? <small>{item.codeSentAt ? `Sign-in code sent ${ago(item.codeSentAt)}` : "No sign-in code yet"} · {AVAILABILITY_LABEL[item.availability] || item.availability}</small> : null}
+                  {item.status === "approved" ? <small>{item.codeSentAt ? `Sign-in code sent ${ago(item.codeSentAt)}` : "No sign-in code yet"} · {AVAILABILITY_LABEL[item.availability] || item.availability}{item.availability === "available" || item.availability === "busy" ? "" : " · not receiving new requests"}</small> : null}
                   {state?.place ? (
                     <div className="inp team-select" style={{ marginTop: 8, maxWidth: 360 }}>
                       <Icon n="pin" c="m" />

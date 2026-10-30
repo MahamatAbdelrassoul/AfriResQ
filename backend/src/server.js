@@ -7,6 +7,7 @@ import pg from "pg";
 import { adminRouter, seedAdmin } from "./admin.js";
 import { authRouter } from "./auth.js";
 import { casesRouter } from "./cases.js";
+import { channelsRouter } from "./channels.js";
 import { deskRouter, seedDeskCodes } from "./desks.js";
 import { forgetOldPlaces, peopleRouter } from "./people.js";
 import { partnerRouter } from "./partners.js";
@@ -42,11 +43,13 @@ pool.on("error", (err) => {
 
 app.use(cors());
 app.use(express.json());
+app.use(express.urlencoded({ extended: false }));
 
 app.use("/api/auth", authRouter(pool));
 app.use("/api/people", peopleRouter(pool));
 app.use("/api/safety", safetyRouter(pool));
 app.use("/api/cases", casesRouter(pool));
+app.use("/api/channels", channelsRouter(pool));
 app.use("/api/places", placesRouter(pool));
 app.use("/api/partners", partnerRouter(pool));
 app.use("/api/announcements", announcementRouter(pool));

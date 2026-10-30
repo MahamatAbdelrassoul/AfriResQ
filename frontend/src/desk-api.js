@@ -1,3 +1,5 @@
+import { apiUrl } from "./api.js";
+
 const KEY = "afriresq-desk";
 
 export function readDeskSession() {
@@ -23,7 +25,7 @@ async function readBody(res) {
 }
 
 export async function openDesk(placeId, code) {
-  const res = await fetch("/api/desk/session", {
+  const res = await fetch(apiUrl("/api/desk/session"), {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ placeId, code }),
@@ -33,14 +35,14 @@ export async function openDesk(placeId, code) {
 
 export async function closeDesk(token) {
   if (!token) return;
-  await fetch("/api/desk/session", {
+  await fetch(apiUrl("/api/desk/session"), {
     method: "DELETE",
     headers: { Authorization: `Bearer ${token}` },
   }).catch(() => {});
 }
 
 export async function deskMe(token) {
-  const res = await fetch("/api/desk/me", { headers: { Authorization: `Bearer ${token}` } });
+  const res = await fetch(apiUrl("/api/desk/me"), { headers: { Authorization: `Bearer ${token}` } });
   const body = await res.json().catch(() => ({}));
   if (res.status === 401) throw Object.assign(new Error(body.error || "Sign in to this desk first."), { signedOut: true });
   if (!res.ok) throw new Error(body.error || "The desk could not be reached.");

@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from "react";
 import { useApp } from "./app-state.js";
 import { answerSafetyAlert, cancelCheckin, endTrip, planWalk, safetyMine, saveLastPlace, startCheckin, startSafetyAlert, startTrip } from "./account-api.js";
-import { pinFrom, readFix, watchFix } from "./locate.js";
+import { apiUrl } from "./api.js";
+import { onDevice, pinFrom, readFix, watchFix } from "./locate.js";
 import { HOME, ROUTES, STEPS, YOU, pointAlong } from "./map.js";
 import { PartnerCase, PartnerGate, PartnerHome, PartnerLogin, PartnerQueue, PartnerSignIn } from "./partner.jsx";
 import { PARTNER_CATEGORIES } from "./partner-categories.js";
@@ -37,7 +38,14 @@ const OTHER = [
   ["disaster", "Disaster", "storm"],
   ["other", "Other", "more"],
 ];
-const POLICE = ["accident", "security", "missing"];
+const RESPONDER_KIND = {
+  accident: "police",
+  security: "police",
+  missing: "police",
+  fire: "fire",
+  disaster: "disaster",
+  other: "disaster",
+};
 const DESKS = {
   accident: ["Makerere Police Station", 1],
   fire: ["Fire and rescue desk", 0],
@@ -320,10 +328,30 @@ function PartnerJoin() {
   }
 
   async function submit() {
+    const email = form.email.trim();
+    const repEmail = form.representativeEmail.trim();
+    const university = applicantKind === "university";
+    const domain = form.studentDomain.trim().replace(/^@/, "").toLowerCase();
+    const domainOk = /^[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?\.[a-z]{2,}$/.test(domain) && !domain.includes("..");
+    const problem = !form.organisation.trim() ? `Enter the ${university ? "university" : "organisation"}'s name.`
+      : university && !form.city.trim() ? "Enter the city."
+      : university && !domainOk ? "Enter the student email domain, such as students.kyu.ac.ug."
+      : !university && !primary ? "Choose the main service."
+      : !form.phone.trim() ? `Enter the ${university ? "university" : "organisation"}'s telephone.`
+      : !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) ? "Enter a real official email, such as name@organisation.ug."
+      : !form.address.trim() ? (university ? "Enter the campus address, so AfriResQ can find it." : "Enter the physical address, so AfriResQ can find the base.")
+      : !form.representativeName.trim() ? `Enter the name of the person who can speak for the ${university ? "university" : "organisation"}.`
+      : !form.representativePhone.trim() ? "Enter that person's telephone."
+      : repEmail && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(repEmail) ? "Enter a real email for that person, or leave it blank."
+      : "";
+    if (problem) {
+      setError(problem);
+      return;
+    }
     setBusy(true);
     setError("");
     try {
-      const res = await fetch("/api/partners", {
+      const res = await fetch(apiUrl("/api/partners"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ ...form, applicantKind, primaryCategory: primary, extraCategories: extras }),
@@ -348,7 +376,7 @@ function PartnerJoin() {
           <Hdr title="Pending verification" sub={form.organisation} sos={false} />
           <Note icon="lock">AfriResQ has the request. This {university ? "university" : "organisation"} will not receive a case until the team confirms it. Call 999 or 112 if someone needs help now.</Note>
           <Note icon="pin">Once confirmed, your {university ? "university" : "organisation"} gets its own place on the AfriResQ map and receives cases there.</Note>
-          <Note icon="mail">Once confirmed, a sign-in code goes to {form.email || "the official email"} and by SMS to {form.representativeName || "the representative"}. Use it under Partner sign-in on the welcome screen.</Note>
+          <Note icon="mail">Once confirmed, a sign-in code goes to {form.email || "the official email"}{form.representativeEmail.trim() ? ` and ${form.representativeEmail.trim()}` : ""} and by SMS to {form.representativeName || "the representative"}. Sign in with either email under Partner sign-in on the welcome screen.</Note>
           {university && form.announcementName ? <Note icon="users">The group “{form.announcementName}” opens for students once AfriResQ confirms this university.</Note> : null}
         </div>
       </Screen>
@@ -916,6 +944,7 @@ function WelcomeBack() {
 
 // What the person sees about a request they sent, in their own words.
 const REQUEST_STATUS = {
+  queued: ["Saved on this phone", "It will send when the network returns.", "warn"],
   sent: ["Waiting for a reply", "Your request is sent. The team is being told.", "warn"],
   accepted: ["Accepted", "A team has taken your request.", "ok"],
   on_the_way: ["On the way", "Help is coming to you.", "ok"],
@@ -929,7 +958,7 @@ function RequestStatusCard() {
   refreshRef.current = refreshCase;
   const status = kase ? REQUEST_STATUS[kase.state] : null;
   useEffect(() => {
-    if (!kase?.id || !status || kase.state === "declined") return undefined;
+    if (!kase?.id || !status || kase.queued || kase.state === "declined") return undefined;
     const id = setInterval(() => refreshRef.current(), 5000);
     return () => clearInterval(id);
   }, [kase?.id, kase?.state]);
@@ -1044,7 +1073,7 @@ function Home() {
         )}
         </div>
         <div className="desk-more">
-        <div className="sec"><h3>Other emergencies</h3><small>Go to their own desk</small></div>
+        <div className="sec"><h3>Other emergencies</h3><small>A desk that is on duty</small></div>
         <div className="grid6">
           {OTHER.map(([id, label, icon]) => (
             <button type="button" className="ot" key={id} onClick={() => { setOtherType(id); go("other"); }}>
@@ -1063,6 +1092,15 @@ function Home() {
       </div>
     </Screen>
   );
+}
+
+function previewDesk(places, otherType) {
+  const kind = RESPONDER_KIND[otherType] || "disaster";
+  const open = Object.values(places).filter((place) => place.kind === kind && place.conn);
+  open.sort((a, b) => a.dist - b.dist);
+  if (open[0]) return { name: open[0].name, matched: true };
+  if (places.mps?.conn) return { name: places.mps.name, matched: kind === "police" };
+  return null;
 }
 
 function placeIds(places, filter, student, uni) {
@@ -1089,7 +1127,7 @@ function PlaceCard({ id }) {
         <small>{place.dist} km away, {place.drive} min drive</small>
         <span className="badges">
           {uni ? <em className="bd vio"><Icon n="cap" c="s" />Your university</em> : null}
-          {place.conn ? <em className="bd ok"><Icon n="amb" c="s" />Ambulance available</em> : <em className="bd warn">Call and route only</em>}
+          {place.busy ? <em className="bd warn"><Icon n="amb" c="s" />Ambulance busy</em> : place.conn ? <em className="bd ok"><Icon n="amb" c="s" />Ambulance available</em> : <em className="bd warn">Call and route only</em>}
         </span>
       </span>
       <Icon n="chevR" c="chev" />
@@ -1127,7 +1165,7 @@ function Places() {
             <Btn tone="out sm" onClick={() => setFilter("all")}>Show all places</Btn>
           </>
         )}
-        <Note>Connected places can send an ambulance. Listed places can be called and routed to only.</Note>
+        <Note>A place takes an ambulance when it is connected and its team is available or busy. Other places can be called and routed to only.</Note>
       </div>
     </Screen>
   );
@@ -1135,17 +1173,20 @@ function Places() {
 
 function GpsNote() {
   const { fix } = useApp();
+  const phone = onDevice();
   if (fix?.status === "ready") {
     return <Note icon="pin">Location shared. Accurate to about {fix.accuracy} m. The desk sees this pin.</Note>;
   }
   if (fix?.status === "denied" || fix?.status === "failed") {
-    return <Note tone="gold" icon="pin">This browser did not share a location. Use saved home, or write the place. A phone opened as 192.168 cannot share GPS. Use localhost.</Note>;
+    return phone
+      ? <Note tone="gold" icon="pin">This phone did not share a location. Allow location for AfriResQ, or use saved home, or write the place.</Note>
+      : <Note tone="gold" icon="pin">This browser did not share a location. Use saved home, or write the place. A phone opened as 192.168 cannot share GPS. Use localhost.</Note>;
   }
-  return <Note icon="pin">Asking this browser for its location.</Note>;
+  return <Note icon="pin">{phone ? "Asking this phone for its location." : "Asking this browser for its location."}</Note>;
 }
 
 function Report() {
-  const { report, setReport, user, setPath, go, setMode, setPlace, student, askFix } = useApp();
+  const { report, setReport, user, setPath, go, setMode, setPlace, setFilter, student, places, askFix } = useApp();
   useEffect(() => {
     if (report.where === "gps") askFix();
   }, [report.where]);
@@ -1204,8 +1245,10 @@ function Report() {
       <div className="foot">
         <Btn onClick={() => {
           setReport({ ...report, done: true });
+          const open = placeIds(places, "amb", student, user.uni);
           setMode(student ? "uni" : "nearest");
-          setPlace("mak");
+          setPlace(student ? "mak" : (open[0] || "mak"));
+          if (!student) setFilter("amb");
           go("help");
         }}>Continue to help options</Btn>
       </div>
@@ -1328,7 +1371,7 @@ function Place() {
         </div>
         <div className="badges">
           {uni ? <em className="bd vio"><Icon n="cap" c="s" />Your university</em> : null}
-          {item.conn ? <em className="bd ok"><Icon n="shield" c="s" />Connected to AfriResQ</em> : <em className="bd warn">Listed only</em>}
+          {item.busy ? <em className="bd warn"><Icon n="shield" c="s" />Connected, currently busy</em> : item.conn ? <em className="bd ok"><Icon n="shield" c="s" />Connected to AfriResQ</em> : <em className="bd warn">Listed only</em>}
         </div>
         {item.conn ? (
           <button type="button" className="opt a" onClick={async () => {
@@ -1461,8 +1504,9 @@ function Ambulance() {
   const item = places[place] || places.mak;
   const you = kase?.whereLat != null && kase?.whereLng != null ? [Number(kase.whereLat), Number(kase.whereLng)] : pinFrom(fix, YOU);
   const route = item?.ll ? [you, item.ll] : [...(ROUTES[place] || ROUTES.mak)].reverse();
+  const queued = Boolean(kase?.queued);
   const stage = { sent: 0, accepted: 1, on_the_way: 2, arrived: 3, closed: 3 }[kase?.state] ?? 0;
-  const crew = stage >= 1;
+  const crew = stage >= 1 && !queued;
   useEffect(() => {
     let stop = false;
     const pull = async () => {
@@ -1478,7 +1522,7 @@ function Ambulance() {
     };
   }, [go]);
   useEffect(() => {
-    if (!kase?.id || kase.where !== "gps") return undefined;
+    if (!kase?.id || kase.queued || kase.where !== "gps") return undefined;
     if (["arrived", "closed", "cancelled"].includes(kase.state)) return undefined;
     return watchFix((point) => {
       moveRef.current({
@@ -1490,7 +1534,9 @@ function Ambulance() {
   }, [kase?.id, kase?.where, kase?.state]);
   const amb = pointAlong(route, stage >= 2 ? 0.62 : 0.08);
   const declined = kase?.state === "declined";
-  const copy = declined ? ["Request declined", `${item.name} could not take it`, "Declined"] : CASE_COPY[stage];
+  const copy = queued
+    ? ["Saved on this phone", "The network did not answer. This request sends itself when the signal returns.", "Waiting to send"]
+    : declined ? ["Request declined", `${item.name} could not take it`, "Declined"] : CASE_COPY[stage];
   return (
     <Screen bare>
       <MapBoard className="map mapfull" opts={{ route, pins: [place], you, amb, look: "route" }}>
@@ -1504,7 +1550,7 @@ function Ambulance() {
             <h3 style={{ font: "800 20px var(--font)", letterSpacing: "-.01em" }}>{copy[0]}</h3>
             <div className="fine" style={{ textAlign: "left" }}>{copy[1]}</div>
           </div>
-          {declined ? null : <div className="eta">{stage >= 2 ? "…" : item.amb || "—"}<small>{stage >= 2 ? "" : "min"}</small></div>}
+          {declined || queued ? null : <div className="eta">{stage >= 2 ? "…" : item.amb || "—"}<small>{stage >= 2 ? "" : "min"}</small></div>}
         </div>
         {declined ? (
           <DeclinedPanel
@@ -1514,7 +1560,8 @@ function Ambulance() {
             onCall={() => openSheet("lines")}
           />
         ) : null}
-        {declined ? null : <div className="tl">
+        {queued ? <Note icon="radio">Call 999 or 112 if someone needs help before this phone can reach AfriResQ.</Note> : null}
+        {declined || queued ? null : <div className="tl">
           {CASE_STEPS.map(([title, detail], index) => (
             <div key={title} className={`st${index < stage || stage === 3 ? " done" : ""}${index === stage && stage < 3 ? " now" : ""}`}>
               <i><Icon n="check" c="s" /></i>
@@ -1579,7 +1626,7 @@ function Closed() {
         <div className="card" style={{ padding: "6px 16px" }}>
           <div className="kv"><span>Case</span><b>{current.id}</b></div>
           <div className="kv"><span>Type</span><b>{current.type}</b></div>
-          <div className="kv"><span>Place</span><b>{current.kind === "other" ? DESKS[current.otherType || otherType][0] : item.name}</b></div>
+          <div className="kv"><span>Place</span><b>{current.kind === "other" ? (current.desk || DESKS[current.otherType || otherType][0]) : item.name}</b></div>
           <div className="kv"><span>Path</span><b>{amb ? "Ambulance" : current.path === "desk" ? "Desk" : "Went myself"}</b></div>
           <div className="kv"><span>Closed at</span><b>{time}</b></div>
         </div>
@@ -1609,20 +1656,22 @@ function Closed() {
 }
 
 function Other() {
-  const { otherType, otherText, setOtherText, report, setReport, setPath, beginCase, go, askFix } = useApp();
+  const { otherType, otherText, setOtherText, report, setReport, setPath, beginCase, go, askFix, places } = useApp();
   useEffect(() => {
     if (report.where === "gps") askFix();
   }, [report.where]);
   const type = OTHER.find((item) => item[0] === otherType);
-  const desk = DESKS[otherType];
+  const preview = previewDesk(places, otherType);
   return (
     <Screen>
       <div className="body">
-        <PageArt kind={otherType} title={type[1]} sub="Goes to its own desk" sos />
+        <PageArt kind={otherType} title={type[1]} sub="Goes to a desk that can accept it" sos />
         <div className="form-side">
-        <Note tone={desk[1] ? "" : "gold"}>
-          This does not open the medical ambulance. It goes to: <b>{desk[0]}</b>
-          {desk[1] ? "." : ", which is not connected in your area yet. Your case is still saved."}
+        <Note tone={preview ? "" : "gold"}>
+          This does not open the medical ambulance.{" "}
+          {preview
+            ? <>It goes to <b>{preview.name}</b>{preview.matched ? ", which is on duty for this." : ". No specialist desk is on duty, so the police station takes the report and can call you."}</>
+            : "No desk is on duty for this right now. Call 999 or 112."}
         </Note>
         <Field label="What happened?">
           <textarea className="area" placeholder="Describe it in a sentence or two" value={otherText} onChange={(event) => setOtherText(event.target.value)} />
@@ -1653,10 +1702,10 @@ function Other() {
           const ok = await beginCase({
             kind: "other",
             path: "desk",
-            place: POLICE.includes(otherType) ? "mps" : "",
+            place: "",
             what: type[1],
             otherType,
-            desk: desk[0],
+            desk: preview?.name || "",
             detail: otherText,
             state: "sent",
           });
@@ -1671,15 +1720,15 @@ function Other() {
 function Desk() {
   const { otherType, kase, user, go, setReport, moveCase, refreshCase, showToast, clearCase, openSheet } = useApp();
   const type = OTHER.find((item) => item[0] === otherType);
-  const desk = DESKS[otherType];
-  const connected = desk[1];
+  const deskName = kase?.desk || DESKS[otherType][0];
+  const connected = Boolean(kase?.place);
   const current = kase || { id: "AR-3010", state: "sent" };
   const refreshRef = useRef(refreshCase);
   refreshRef.current = refreshCase;
   const rank = { sent: 0, accepted: 1, on_the_way: 2, arrived: 3, closed: 4 };
   const now = rank[current.state] ?? 0;
   useEffect(() => {
-    if (!connected || !kase?.id) return undefined;
+    if (!connected || !kase?.id || kase.queued) return undefined;
     let stop = false;
     const pull = async () => {
       const saved = await refreshRef.current();
@@ -1707,9 +1756,10 @@ function Desk() {
           ]}
         />
         <div className="form-side">
+        {current.queued ? <Note icon="radio">Saved on this phone. It sends when the network returns. Call 999 or 112 if someone needs help now.</Note> : null}
         {current.state === "declined" ? (
           <DeclinedPanel
-            where={current.desk || desk[0]}
+            where={current.desk || deskName}
             reason={current.declineReason}
             onOther={() => { clearCase(); go("home", null, true); }}
             onCall={() => openSheet("lines")}
@@ -1719,7 +1769,7 @@ function Desk() {
           <div className="row">
             <span className={`ico ${connected ? "green" : "gold"}`}><Icon n={type[2]} /></span>
             <div className="grow">
-              <b style={{ fontSize: 16 }}>{desk[0]}</b>
+              <b style={{ fontSize: 16 }}>{deskName}</b>
               <div className="fine" style={{ textAlign: "left" }}>{connected ? "Connected" : "Not connected in your area yet"}</div>
             </div>
           </div>
@@ -1737,7 +1787,7 @@ function Desk() {
             ))}
           </div>
         </div>
-        {connected ? <Note icon="phone">The desk calls the number on your profile: +256 {user.phone}.</Note> : <Note tone="red" icon="alert">Nobody can accept this report yet. Call 999 or 112 now. Your case stays saved with your location.</Note>}
+        {connected ? <Note icon="phone">{deskName} has this report and calls the number on your profile: +256 {user.phone}.</Note> : current.queued ? null : <Note tone="red" icon="alert">Nobody can accept this report yet. Call 999 or 112 now. Your case stays saved with your location.</Note>}
         <div className="row" style={{ gap: 10 }}>
           <a className="btn red sm" href="tel:999"><Icon n="phone" c="m" />Call 999</a>
           <a className="btn red sm" href="tel:112"><Icon n="phone" c="m" />Call 112</a>
@@ -3000,6 +3050,84 @@ function TripTimeUp() {
   );
 }
 
+function UssdDial({ code, phone }) {
+  const readyPhone = String(phone || "").replace(/\D/g, "").length >= 9 ? phone : "";
+  const [number, setNumber] = useState(readyPhone);
+  const [started, setStarted] = useState(false);
+  const [sessionId] = useState(() => `app-${Date.now().toString(36)}`);
+  const [chain, setChain] = useState("");
+  const [screen, setScreen] = useState("");
+  const [entry, setEntry] = useState("");
+  const [done, setDone] = useState(false);
+  const [busy, setBusy] = useState(false);
+
+  async function send(nextChain, caller) {
+    setBusy(true);
+    try {
+      const res = await fetch(apiUrl("/api/channels/dial"), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ phoneNumber: caller, text: nextChain, sessionId }),
+      });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(body.error || "AfriResQ did not answer.");
+      const reply = String(body.reply || "");
+      setScreen(reply.replace(/^(CON|END)\s?/, ""));
+      setDone(reply.startsWith("END"));
+      setChain(nextChain);
+      setEntry("");
+    } catch {
+      const place = entry.trim();
+      const draft = place ? `AMBULANCE ${place}` : "AMBULANCE and the place";
+      setScreen(`The network did not answer.\n\nText ${draft} from this phone, or call 999 or 112.`);
+      setDone(true);
+    } finally {
+      setBusy(false);
+    }
+  }
+  function advance(value) {
+    const piece = String(value || "").trim();
+    if (!piece || done || busy) return;
+    send(chain ? `${chain}*${piece}` : piece, number);
+  }
+
+  if (!started) {
+    return (
+      <div className="ussd">
+        <b>Dial {code}</b>
+        <pre>{"Your Uganda number\nThen choose ambulance, police, or fire."}</pre>
+        <div className="row">
+          <input inputMode="tel" aria-label="Your Uganda number" placeholder="7XX XXX XXX" value={number} onChange={(event) => setNumber(event.target.value)} />
+          <button type="button" disabled={busy || number.replace(/\D/g, "").length < 9} onClick={() => { setStarted(true); send("", number); }}>Dial</button>
+        </div>
+      </div>
+    );
+  }
+
+  const choosing = !done && chain === "";
+  return (
+    <div className="ussd">
+      <b>{code}</b>
+      <pre>{screen || "Connecting…"}</pre>
+      {done ? null : (
+        <>
+          {choosing ? (
+            <div className="row">
+              <button type="button" disabled={busy} onClick={() => advance("1")}>1</button>
+              <button type="button" disabled={busy} onClick={() => advance("2")}>2</button>
+              <button type="button" disabled={busy} onClick={() => advance("3")}>3</button>
+            </div>
+          ) : null}
+          <div className="row">
+            <input aria-label="USSD reply" placeholder={choosing ? "Or type 1, 2, or 3" : "The place"} value={entry} onChange={(event) => setEntry(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") advance(entry); }} />
+            <button type="button" disabled={busy || !entry.trim()} onClick={() => advance(entry)}>Send</button>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
 const BELL_SEEN = "afriresq-bell-seen";
 
 function readBellSeen() {
@@ -3122,6 +3250,22 @@ export function Sheets() {
   useEffect(() => {
     if (sheet === "notifs") markBellSeen(notices.map((item) => item.key));
   }, [sheet, noticeKeys]);
+
+  const [ussd, setUssd] = useState("*284#");
+  useEffect(() => {
+    if (sheet !== "lines") return undefined;
+    let stop = false;
+    fetch(apiUrl("/api/channels"))
+      .then((res) => res.json())
+      .then((body) => {
+        if (!stop && body.ussd) setUssd(body.ussd);
+      })
+      .catch(() => {});
+    return () => {
+      stop = true;
+    };
+  }, [sheet]);
+
   if (!sheet) return <div className="backdrop" />;
   let body = null;
   if (sheet === "lines") {
@@ -3131,6 +3275,7 @@ export function Sheets() {
         <p className="sub">AfriResQ sits beside these lines. It does not replace them.</p>
         <a className="btn red" href="tel:999"><Icon n="phone" />Call 999</a>
         <a className="btn red" href="tel:112"><Icon n="phone" />Call 112</a>
+        <UssdDial code={ussd} phone={user?.phone || ""} />
       </>
     );
   }

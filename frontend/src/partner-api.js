@@ -1,3 +1,5 @@
+import { apiUrl } from "./api.js";
+
 const KEY = "afriresq-partner";
 
 export function readPartnerSession() {
@@ -22,7 +24,7 @@ async function call(path, { method = "GET", body, token } = {}) {
   const headers = {};
   if (token) headers.Authorization = `Bearer ${token}`;
   if (body !== undefined) headers["Content-Type"] = "application/json";
-  const res = await fetch(`/api/partners${path}`, {
+  const res = await fetch(apiUrl(`/api/partners${path}`), {
     method,
     headers,
     body: body === undefined ? undefined : JSON.stringify(body),
